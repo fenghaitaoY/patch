@@ -1,0 +1,102 @@
+diff --git a/fingerprint/service/malib/Android.mk b/fingerprint/service/malib/Android.mk
+index e2c73fe..d971362 100644
+--- a/fingerprint/service/malib/Android.mk
++++ b/fingerprint/service/malib/Android.mk
+@@ -11,9 +11,9 @@ LOCAL_SRC_FILES := \
+ 	utils/malib.c \
+ 	utils/mastring.c \
+ 	utils/malog.c \
+-	utils/masnprintf.c
+-	#utils/bitmap.c\
+-	#pgm/pgm.c
++	utils/masnprintf.c \
++	utils/bitmap.c \
++	pgm/pgm.c
+ 
+ LOCAL_MODULE := malib
+ 
+diff --git a/fingerprint/service/soft_sensor/sensor96/sensor_wrapper.c b/fingerprint/service/soft_sensor/sensor96/sensor_wrapper.c
+index 4863c10..0809342 100644
+--- a/fingerprint/service/soft_sensor/sensor96/sensor_wrapper.c
++++ b/fingerprint/service/soft_sensor/sensor96/sensor_wrapper.c
+@@ -296,6 +296,7 @@ static int algorithm96_press_detect_texture(void *image, int type) {
+ 	if(count > IMAGE_SIZE){
+ 	    LOGE("press count[%d] is wrong", count);
+ 	}
++
+ 	sratio = count*100/IMAGE_SIZE;
+     LOGD("detect type = %d sratio = %d", type, sratio);
+ 	switch(type) {
+@@ -324,6 +325,15 @@ static int algorithm96_press_detect_texture(void *image, int type) {
+ 			g_enroll_ctx->max_count = count;
+ 		}
+ 	}
++    char name[128];
++    static int num = 0;
++    sprintf(name, "/data/system/users/0/fpdata/press_bkg_%.3d_ratio_%d.bmp", num, sratio);
++    save_bmp_file(name, g_auth_ctx->remove_bkg_img, IMAGE_W, IMAGE_H);
++
++    sprintf(name, "/data/system/users/0/fpdata/press_image_in_%.3d.bmp", num);
++    save_bmp_file(name, image_in, IMAGE_W, IMAGE_H);
++    num++;
++
+ 	LOGD("***count=%d, ret=%d grey offset %d\n", count, ret, g_enroll_ctx->grey_offset);
+ 
+ 	return ret;
+@@ -391,7 +401,7 @@ static int do_match_update(int snum, int score, int area, int tempn) {
+ }
+ 
+ static int match_save_bmp(int val, int char_num) {
+-#ifdef SAVE96_FILE
++//#ifdef SAVE96_FILE
+     char name[128] = {0};
+     static int num = 0;
+ 
+@@ -403,7 +413,7 @@ static int match_save_bmp(int val, int char_num) {
+     save_bmp_file(name, g_auth_ctx->remove_bkg_img, IMAGE_W, IMAGE_H);
+ 
+     num++;
+-#endif
++//#endif
+     return 0;
+ }
+ 
+@@ -451,17 +461,17 @@ match_again:
+         }
+     }
+ 
++    match_save_bmp(ret, char_num);
+     if(ret != 0) {
+         LOGD("score=%d, char_num=%d, matchArea=%d score_th=%d, temp_idx=%d, temp_num=%d ratio=%d isMult=%d\n",
+              last_score, char_num, last_area, g_config.auth_score, last_temp_idx, last_temp_num, sratio, isMult);
+-        match_save_bmp(ret, char_num);
+         LOGD("match successfully.");
+     } else {
+         if(isMult==1) {
+             isMult = 0;
+-            goto match_again;
++            //goto match_again;
+         } else if(count_down == 0) {
+-            match_save_bmp(ret, char_num);
++            //match_save_bmp(ret, char_num);
+             LOGD("score=%d, char_num=%d, matchArea=%d score_th=%d, ratio=%d\n",
+                 score, char_num, area, g_config.auth_score, sratio);
+             LOGD("match failed.");
+@@ -498,7 +508,7 @@ static int algorithm96_enroll_start(uint64_t user_id) {
+ }
+ 
+ static int enroll_save_bmp(int val) {
+-#ifdef SAVE96_FILE
++//#ifdef SAVE96_FILE
+     char name[128] = {0};
+     static int num = 0;
+     unsigned char *enroll_image = (unsigned char *)context_get_img_buf();
+@@ -511,7 +521,7 @@ static int enroll_save_bmp(int val) {
+     save_bmp_file(name, enroll_image, IMAGE_W, IMAGE_H);
+     num++;
+ 
+-#endif
++//#endif
+ 
+     return 0;
+ }

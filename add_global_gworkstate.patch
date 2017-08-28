@@ -1,0 +1,50 @@
+diff --git a/fingerprint/client/libfprint/include/globalvar.h b/fingerprint/client/libfprint/include/globalvar.h
+index 694d6b6..818e852 100644
+--- a/fingerprint/client/libfprint/include/globalvar.h
++++ b/fingerprint/client/libfprint/include/globalvar.h
+@@ -26,6 +26,7 @@ enum fp_acquired_info {
+ 
+ extern int gNotCalibrated;
+ extern hw_auth_token_t *gHat;
++extern int gWorkState;
+ 
+ extern microarray_properties_t g_config;
+ 
+diff --git a/fingerprint/client/libfprint/process/authenticate.c b/fingerprint/client/libfprint/process/authenticate.c
+index c99c08a..ff33133 100644
+--- a/fingerprint/client/libfprint/process/authenticate.c
++++ b/fingerprint/client/libfprint/process/authenticate.c
+@@ -73,6 +73,10 @@ static int verify(struct cmd_entry *qe)
+ 
+ 	while (1) {
+ 		//not check cancel flag, when checking leave
++        LOGD("-------------gWorkState = %d ",gWorkState);
++        if(gWorkState != PROCESS_AUTHENTICATE){
++            break;
++        }
+ 	    down = ma_tac_detectTouch_getEnergy();
+ 	    if(down < 0) {
+ 	        error_notify(FINGERPRINT_ERROR_HW_UNAVAILABLE);
+diff --git a/fingerprint/client/libfprint/process/process.c b/fingerprint/client/libfprint/process/process.c
+index 7a3da4a..df6273a 100644
+--- a/fingerprint/client/libfprint/process/process.c
++++ b/fingerprint/client/libfprint/process/process.c
+@@ -25,7 +25,7 @@ struct cmd_entry g_cmd_tmp; //cmd entry stack
+ struct cmd_entry g_idle_cmd;
+ 
+ int g_factory_test = 0;
+-
++int gWorkState = 0;
+ /*将cmd编号转换成字符串输出
+  * @num cmd编号
+  */
+@@ -122,6 +122,9 @@ static void *fingerprint_hal_main_thread(void *p)
+         }
+         LOGD("Command %s is running\n", _num2string(qe->state));
+ 
++        gWorkState = qe->state;
++        LOGD("-------------gWorkState = %d ",gWorkState);
++
+         qe->cmd_process(qe);
+ 
+         if(sThreadExit){

@@ -1,0 +1,63 @@
+diff --git a/fingerprint/client/libfprint/process/authenticate.c b/fingerprint/client/libfprint/process/authenticate.c
+index 53c3098..80dc36b 100644
+--- a/fingerprint/client/libfprint/process/authenticate.c
++++ b/fingerprint/client/libfprint/process/authenticate.c
+@@ -314,7 +314,7 @@ void* authenticate_detect_work(void *q)
+                         break;
+                     } else {
+                         r = ma_tac_check_press(&press_ok);
+-                        LOGD("tac check press , sec r = %d, press_ok = %d\n",r, press_ok);
++                        LOGD(" fht tac check press , sec r = %d, press_ok = %d\n",r, press_ok);
+                     }
+                 }
+             }
+diff --git a/fingerprint/service/soft_sensor/sensor83/sensor_wrapper.c b/fingerprint/service/soft_sensor/sensor83/sensor_wrapper.c
+index fd49d30..de71434 100644
+--- a/fingerprint/service/soft_sensor/sensor83/sensor_wrapper.c
++++ b/fingerprint/service/soft_sensor/sensor83/sensor_wrapper.c
+@@ -22,6 +22,7 @@
+ //#define SAVE83_FILE
+ 
+ static int sensor83_get_proper_image(void *img, const int len, const int line_step);
++static int sensor83_save_paras(void);
+ static int g_init_enroll = 1;
+ static int s_update_flag = 1;
+ static struct fp_template g_template[FINGERPRINT_SIZE];
+@@ -241,6 +242,16 @@ static int sensor83_refresh_calibrate_data(void) {
+     context_get_sensor83_refdrvsel(&refdrvsel1);
+ 
+     ret = fp83_calc_open_driver_refdrvsel();
++    LOGD("---------------calibreate data ret=%d",ret);
++    if(ret!= SUCCESS){
++        LOGD("---------------fht---------- ret=%d",ret);
++        //remove("data/system/ma_fingerprint/sensor.properties");
++        fp83_calc_init_parameters();
++        fp83_reset_interrupt_parameters();
++        fp83_calc_interrupt_parameters();
++        ret=sensor83_save_paras();
++    }
++
+     context_get_sensor83_refdrvsel(&refdrvsel2);
+     if(refdrvsel2 > refdrvsel1) {
+         fp83_calc_interrupt_parameters();
+@@ -267,6 +278,7 @@ static int sensor83_get_proper_image(void *img, const int len,
+ 	ret = check_grey(image);
+ 
+ 	if(ret != SUCCESS) {
++        LOGD("-------------------------------proper image-----refresh calibrate--");
+ 	    sensor83_refresh_calibrate_data();
+ 	}
+ 
+diff --git a/version/product.csv b/version/product.csv
+index d4e309b..3708db8 100644
+--- a/version/product.csv
++++ b/version/product.csv
+@@ -1,7 +1,7 @@
+ Product,OEM,Version,Support Sensor,Platform,APP ABI,Operation System,Enable Navigation,Return After Authenticate,Filter Duplicate Enroll,Filter Part Touch Enroll,Enroll Times,Auth Retry Times
+ E281,Yude,4.0.1,A121_N,Trustkernel,arm64-v8a,Android6.0,No,Yes,Yes,Yes,25,3
+ X601,Chuanyin,4.0.08,A121_N,Android,arm64-v8a armeabi,Android6.0,Yes,Yes,Yes,No,14,3
+-X572,Chuanyin,4.0.00,A83_T,Android,arm64-v8a,Android6.0,Yes,Yes,Yes,No,14,3
++X572,Chuanyin,4.0.00,A83_T,Android,arm64-v8a armeabi,Android6.0,Yes,Yes,Yes,No,14,3
+ WX4,Chuanyin,4.0.00,A96_N,Android,arm64-v8a armeabi,Android6.0,Yes,Yes,Yes,No,14,3
+ E2,Konka,4.0.00,A80_T,YUNOS,arm64-v8a,Android6.0,Yes,Yes,Yes,No,14,3
+ Android,Tianyida,4.0.00,A80_T,Android,armeabi,Android6.0,Yes,Yes,Yes,No,14,3

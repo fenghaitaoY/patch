@@ -1,0 +1,316 @@
+diff --git a/fingerprint/client/libfprint/tac/microarray_tac.c b/fingerprint/client/libfprint/tac/microarray_tac.c
+index 2920747..2103294 100644
+--- a/fingerprint/client/libfprint/tac/microarray_tac.c
++++ b/fingerprint/client/libfprint/tac/microarray_tac.c
+@@ -261,6 +261,7 @@ int ma_tac_get_energy(void)
+ {
+ 	protocol_get_image_score_t msg;
+ 	ma_tac_security_invoke(PROTOCOL_GET_IMAGE_SCORE, &msg, sizeof(protocol_get_image_score_t));
++    LOGD("=========score = %d \n", msg.response.score);
+ 	if (msg.response.err) {
+ 		LOGE("error with code 0x%x\n", msg.response.err);
+ 	}
+diff --git a/fingerprint/service/soft_sensor/common/sensor_common.c b/fingerprint/service/soft_sensor/common/sensor_common.c
+index 044756f..eaa5388 100644
+--- a/fingerprint/service/soft_sensor/common/sensor_common.c
++++ b/fingerprint/service/soft_sensor/common/sensor_common.c
+@@ -138,7 +138,7 @@ char sensor_get_chip_id(void)
+     LOGD("start.");
+     sensor_set_mode(RESET_MODE); // this will effect sensor's mode how to due it
+     LOGD("set mode.");
+-    sensor_get_register(MA_PRODU_CODE_2_REG, &chipid);
++    sensor_get_register(MA_PRODU_CODE_2_REG, &chipid); //0x04 读取产品码
+     LOGD("sensor id is: %d\n", (int) chipid);
+     LOGD("end.");
+ 
+@@ -156,7 +156,7 @@ void sensor_read_line(unsigned char *line, int size)
+     memset(in, 0xff, size);
+     memset(out, 0xff, size);
+ 
+-    in[0] = MA_READ_LINE_REG;
++    in[0] = MA_READ_LINE_REG; //行采集
+     platform_spi_write_read(in, size, out, size);
+ 
+     memcpy(line, out, size);
+diff --git a/fingerprint/service/soft_sensor/include/sensor_register.h b/fingerprint/service/soft_sensor/include/sensor_register.h
+index 4f8ca1e..c725707 100644
+--- a/fingerprint/service/soft_sensor/include/sensor_register.h
++++ b/fingerprint/service/soft_sensor/include/sensor_register.h
+@@ -9,48 +9,48 @@
+ #define SENSOR_REGISTER_H_
+ 
+ // SPI命令
+-#define MA_PRODU_CODE_1_REG         0x00
+-#define MA_PRODU_CODE_2_REG         0x04
+-#define MA_COMPANY_CODE_1_REG       0x08
+-#define MA_COMPANY_CODE_2_REG       0x0C
+-
+-#define MA_MAIN_CFG_REG             0x10
+-#define MA_VOLTAGE_CFG_REG          0x14
+-#define MA_CAPACITY_CFG_REG         0x18
+-#define MA_BLANK_REG                0x1C
+-
+-#define MA_GREY_EXPF_REG            0x20
+-#define MA_GREY_EXPK_REG            0x24
+-#define MA_GREY_OFST_REG            0x28
+-#define MA_GREY_STEP_REG            0x2C
+-
+-#define MA_START_LINE_REG           0x30
+-#define MA_END_LINE_REG             0x34
+-#define MA_LINE_STEP_REG            0x38
+-#define MA_FRAME_ROWS_REG           0x3c
+-
+-#define MA_FINGER_DET_PARA_T        0x40
+-#define MA_FINGER_DET_PARA_C        0x44
++#define MA_PRODU_CODE_1_REG         0x00 //产品码
++#define MA_PRODU_CODE_2_REG         0x04 //产品码 121--0x79 120--0x78
++#define MA_COMPANY_CODE_1_REG       0x08 //产品码 M --- 0x4d  Micro
++#define MA_COMPANY_CODE_2_REG       0x0C //产品码 A --- 0x41  Array
++
++#define MA_MAIN_CFG_REG             0x10 //0xf0 0xb0  bit3 = 0
++#define MA_VOLTAGE_CFG_REG          0x14 //低三位设置比较器参考电压0 最小，1最大, 电压调整位
++#define MA_CAPACITY_CFG_REG         0x18 //使能比较器，使能电压缓冲，驱动测试输出引脚正常输出，驱动测试值输出0，DA_SC_SHIELD正常输出，DA_DRIVE输出0，积分器使能，代码里配置0x9c, 0xdc 相差滤波器电阻参数调整开关
++#define MA_BLANK_REG                0x1C //0x00 系统时钟为12M 0x10[bit3] = 0,中断IO脚输出中断信号，放电补偿电容调整为最小
++
++#define MA_GREY_EXPF_REG            0x20 //121 没有用到
++#define MA_GREY_EXPK_REG            0x24 //0x00 不调整振荡频率
++#define MA_GREY_OFST_REG            0x28 // factory test :0x00    capture mode or init parameters : 0xff 量化开始前保持的时钟个数，即量化精度
++#define MA_GREY_STEP_REG            0x2C //暂时没用到， 量化精度扩展位
++
++#define MA_START_LINE_REG           0x30 //起始行，0行是dummy（虚拟）行，起esd保护作用  0x01--capture mode   startline&0xff -- detect mode
++#define MA_END_LINE_REG             0x34 //结束行，121行是dummy行，1-120行数据， 121-- capture mode  endline&0xff -- detect mode
++#define MA_LINE_STEP_REG            0x38 //行步长，表示每一次换行是换多少行
++#define MA_FRAME_ROWS_REG           0x3c //帧行数，表明一帧的行数是多少 capture 模式下采一帧为FrameRows， detect Framerows+1,因为进入detect 模式后第一次采集的行不计入帧
++
++#define MA_FINGER_DET_PARA_T        0x40 //中断阈值   手指检测中断产生机制，在一帧量化采集完计算cnt，cnt > FingerDetect_N 拉高中断，否 拉低中断，一帧结束cnt = 0
++#define MA_FINGER_DET_PARA_C        0x44 //中断背景像素均值
+ #define MA_FINGER_DET_PARA_D        0x48   // not use
+ #define MA_FINGER_DET_PARA_L        0x4C   // not use
+ 
+-#define MA_CURRENT_LINE_REG         0x50
+-#define MA_INTERRUPT_REG            0x60
+-#define MA_READ_LINE_REG            0x70
+-#define MA_READ_FRAME_REG           0x78
++#define MA_CURRENT_LINE_REG         0x50 //当前行寄存器 赋值能重新设置当前行， 读出时可确认当前行的值  0x01 第一行
++#define MA_INTERRUPT_REG            0x60 //中断寄存器 detect mode 配置 type&0xff，
++#define MA_READ_LINE_REG            0x70 //121 行读取指令 一行指纹量化并输出，自动行切换
++#define MA_READ_FRAME_REG           0x78 //帧采集指令，
+ 
+-#define MA_POWER_DOWN               0x80
+-#define MA_DETECT_MODE              0x84
++#define MA_POWER_DOWN               0x80 //关闭系统时钟，芯片不工作
++#define MA_DETECT_MODE              0x84 //detect 只需要发capture模式指令并等待2ms，
+ #define MA_CAPTURE_MODE             0x88
+-#define MA_RESET_MODE               0x8C
++#define MA_RESET_MODE               0x8C //reset 模式需要等待8ms才能进入默认的capture模式
+ 
+ #define MA_DUMMY_BYTE               0xFF
+ 
+ 
+ 
+-#define MA_REF_CTRL_REG             0x1C
+-#define MA_FINGER_DET_PARA_N        0x40
+-#define MA_FINGER_DET_PARA_A        0x44
++#define MA_REF_CTRL_REG             0x1C //放电电容调整位，中断IO输出时钟选择
++#define MA_FINGER_DET_PARA_N        0x40 //中断属性
++#define MA_FINGER_DET_PARA_A        0x44 //中断属性
+ //for AFS121
+ #define MA_REF_OSC_REG              0x24
+ #define MA_OFFSET_EXTEND_H          0x2C
+diff --git a/fingerprint/service/soft_sensor/sensor121/algorithm/detect.c b/fingerprint/service/soft_sensor/sensor121/algorithm/detect.c
+index bafb5a6..97acb4b 100644
+--- a/fingerprint/service/soft_sensor/sensor121/algorithm/detect.c
++++ b/fingerprint/service/soft_sensor/sensor121/algorithm/detect.c
+@@ -85,9 +85,9 @@ int fp121_press_detect_texture(uint8_t *imgBuf, int parTH, int *rangeWeight)
+ {
+     int defTH = 64;
+     int refTH = 64 * 256 * 9;
+-    int curTH = 128 * 256 * 9;
++    int curTH = 128 * 256 * 9;  //refTH * 2
+     //  int rangeWeight = 0;
+-
++    //传进阈值不等于默认阈值，重新计算按压阈值值，计算阈值 > 参数阈值 判定有手指按压
+     if (parTH != defTH) {
+         defTH = parTH;
+         refTH = parTH * 256 * 9;
+diff --git a/fingerprint/service/soft_sensor/sensor121/sensor_121.c b/fingerprint/service/soft_sensor/sensor121/sensor_121.c
+index 27b9d4f..008d30a 100644
+--- a/fingerprint/service/soft_sensor/sensor121/sensor_121.c
++++ b/fingerprint/service/soft_sensor/sensor121/sensor_121.c
+@@ -186,7 +186,7 @@ static void sensor_read_image(unsigned char *img, int size)
+     memset(in, 0xff, size);
+     memset(out, 0xff, size);
+ 
+-    in[0] = MA_READ_FRAME_REG;
++    in[0] = MA_READ_FRAME_REG; //帧采集
+     platform_spi_write_read(in, size, out, size);
+     memcpy(img, out, size);
+ }
+@@ -233,22 +233,23 @@ int fp121_calc_init_parameters(void)
+ 
+     img = (unsigned char *)context_get_img_buf();
+     memset(img, 0, DRIVER_IMAGE_SIZE);
+-    ret = sensor_set_mode(RESET_MODE);
++    ret = sensor_set_mode(RESET_MODE); //2ms 后进入capture模式
+     if ( ret != SUCCESS )
+     {
+         return ret;
+     }
+-    sensor_set_register(MA_MAIN_CFG_REG, 0xf0);
++    sensor_set_register(MA_MAIN_CFG_REG, 0xf0); //1111 0000 0x28,0x2c 使用默认值，detect模式下中断检测有效，0x30 0x34 0x38 使用指令赋值，0x50赋值有效，中断IO输出中断信号，传感器输出真实像素值，传感器选择暗背景值，格雷码交互数据，抗干扰
+     sensor_set_register(MA_CAPACITY_CFG_REG, 0xdc);
+-    sensor_set_register(MA_GREY_OFST_REG, 0xff);
+-    sensor_set_register(MA_VOLTAGE_CFG_REG, 0x00);
++    sensor_set_register(MA_GREY_OFST_REG, 0xff); //capture 量化精度
++    sensor_set_register(MA_VOLTAGE_CFG_REG, 0x00);//电压调整, 积分电容调整最小
+     while ( max - min > 1 )
+     {
+         LOGD("middle %d\n", middle);
+-        sensor_set_register(MA_REF_CTRL_REG, middle << 3);
++        sensor_set_register(MA_REF_CTRL_REG, middle << 3); //放电补偿电容调整
+         fp121_read_image(img, IMAGE_SIZE, 1);
+         temp_grey = sensor_get_grey(img, IMAGE_SIZE);
+-        if ( temp_grey > IMAGE_SIZE * 100 )
++        LOGD("temp_grey = %d\n", temp_grey);
++        if ( temp_grey > IMAGE_SIZE * 100 ) //14400 * 100
+         {
+             min = middle;
+         }
+diff --git a/fingerprint/service/soft_sensor/sensor121/sensor_wrapper.c b/fingerprint/service/soft_sensor/sensor121/sensor_wrapper.c
+index d0dd283..45879ad 100644
+--- a/fingerprint/service/soft_sensor/sensor121/sensor_wrapper.c
++++ b/fingerprint/service/soft_sensor/sensor121/sensor_wrapper.c
+@@ -67,7 +67,9 @@ static enroll_context_t *g_enroll_ctx = NULL;
+ static authenticate_context_t *g_auth_ctx = NULL;
+ 
+ /******************************internal functions******************************/
+-
++/*
++ *sensor 切到采图模式
++ */
+ static int sensor121_capture_mode(void)
+ {
+     return fp121_capture_mode();
+@@ -120,18 +122,18 @@ static int sensor121_get_proper_image(void *img, const int len, const int line_s
+         LOGE("set capture_mode error");
+     }
+ 
+-    ret = fp121_read_image(image, len, line_step);
+-    if(SUCCESS != sensor_bkg_check(image, IMAGE_SIZE, 120)) {
++    ret = fp121_read_image(image, len, line_step); //采一帧图
++    if(SUCCESS != sensor_bkg_check(image, IMAGE_SIZE, 120)) { //如果背景合适，计算初始参数
+         fp121_calc_init_parameters();
+         ret = sensor121_capture_mode();
+         if( ret )
+         {
+             LOGE("set capture_mode error");
+         }
+-        ret = fp121_read_image(image, len, line_step);
++        ret = fp121_read_image(image, len, line_step); //采一帧图
+     }
+ 
+-    LOGD("end.\n");
++    LOGD("end ret = %d.\n",ret);
+     return ret;
+ }
+ 
+@@ -164,12 +166,12 @@ static int sensor_get_product_id(char *product_id, int *len)
+     sensor121_reset_mode();
+     if (ret == SUCCESS)
+     {
+-        chip_id = sensor_get_chip_id();
++        chip_id = sensor_get_chip_id(); //读0x04寄存器，得到产品码
+ 
+-        num = g_config.cover_type;
++        num = g_config.cover_type; //芯片类型
+         if ( chip_id == 121 )
+         {
+-            snprintf(product_id, 7, "MA%03d%c", chip_id, cnum[num-1]);
++            snprintf(product_id, 7, "MA%03d%c", chip_id, cnum[num-1]); //例：MA121T
+             *len = 7;
+         }
+         ret = SUCCESS;
+@@ -285,9 +287,9 @@ static int algorithm121_press_detect_texture(void *image_in)
+     int dtc, ret, weight = 0;
+     unsigned char *img = (unsigned char *)context_get_img_buf();
+     LOGD("start.\n");
+-    fp121_remove_bkg((unsigned char *)image_in, context_get_bkg(), g_auth_ctx->remove_bkg_img);
++    fp121_remove_bkg((unsigned char *)image_in, context_get_bkg(), g_auth_ctx->remove_bkg_img); //原图去背景
+     memcpy(img, g_auth_ctx->remove_bkg_img, IMAGE_SIZE);
+-    dtc = fp121_press_detect_texture(img, g_config.detect_threshold, &weight);
++    dtc = fp121_press_detect_texture(img, g_config.detect_threshold, &weight); //去除背景后的图，阈值,
+     ret = ( dtc == 1 ) ? NORMAL_PRESSED : NORMAL_UNPRESSED;
+     LOGD("end.\n");
+     return ret;
+@@ -308,10 +310,10 @@ static int algorithm121_get_energy(void *image)
+ 
+     LOGD("start.\n");
+ 
+-    context_get_bkg_energy(&bkg_energy);
+-    context_get_interrupt_calibrated(&calibrated);
++    context_get_bkg_energy(&bkg_energy); //获取已存能量值
++    context_get_interrupt_calibrated(&calibrated); //是否校准过
+ 
+-    tell_bkg(image_in, 1, &is_stable, &score);
++    tell_bkg(image_in, 1, &is_stable, &score); //计算当前传进图像的分数
+     if ((calibrated == 0) &&
+             ((!s_init_flag && score > 0) || (score > 0 && score < bkg_energy && is_stable == 1))) {
+         LOGD("score %d minenergy %d is_stable=%d, init_flag=%d\n",
+@@ -324,7 +326,7 @@ static int algorithm121_get_energy(void *image)
+         }
+         s_init_flag = 1;
+     }
+-    if (score > g_enroll_ctx->max_score)
++    if (score > g_enroll_ctx->max_score) //如果当前图像分数 > 最大分数,那么将这帧图像cp 给max_image, 分数一样保存
+     {
+         memcpy(g_enroll_ctx->max_image, image_in, IMAGE_SIZE);
+         g_enroll_ctx->max_score = score;
+@@ -344,24 +346,25 @@ static int algorithm121_authenticate(void)
+ 
+     int val=0, ret=0;
+     int len=0, score=0, snum=0;
+-    unsigned char *tmp_img = (unsigned char *)context_get_img_buf();
++    unsigned char *tmp_img = (unsigned char *)context_get_img_buf(); //15360*10 150kb
+     uint32_t fidlist[FINGERPRINT_SIZE];
+-    unsigned char *template_data = (unsigned char *)context_get_tempalte_buf();
++    unsigned char *template_data = (unsigned char *)context_get_tempalte_buf(); //3664*50
+     memset(template_data, 0, TEMPLATE_SIZE*TEMPLATE_NUM);
+ 
++    //g_auth_ctx->remove_bkg_img 去背景图
+     memcpy(tmp_img, g_auth_ctx->remove_bkg_img, IMAGE_SIZE);
+     //1.enumate template
+-    policy_enumerate_fingerid(fidlist, &len);
++    policy_enumerate_fingerid(fidlist, &len); //取出所有已存模板fid
+     //2.authenticate
+     while ( len-- )
+     {
+-        policy_get_template_data(fidlist[len], template_data);
+-        //注意：afs_match改变了src内数据
++        policy_get_template_data(fidlist[len], template_data); //取出模板数据
++        //注意：afs_match改变了src内数据 , tmp_img 实时采图 ， template_data 已存模板图，score 匹配分数， snum 特征点
+         val = afs_match(tmp_img, template_data, TEMPLATE_NUM, g_config.auth_level, &score, &snum);
+         LOGD("score=%d, template_num=%d, score_threshold=%d, template_threshold=%d, val=%d.\n",
+              score, snum, g_config.auth_score, g_config.auth_characteristic_num, val);
+         if (score > g_config.auth_score && snum > g_config.auth_characteristic_num) {
+-            policy_update_template_data(fidlist[len], template_data);
++            policy_update_template_data(fidlist[len], template_data); //匹配成功后更新模板
+             ret = fidlist[len];
+             break;
+         }
+@@ -384,7 +387,7 @@ static int algorithm121_enroll_start(uint64_t user_id)
+     g_enroll_ctx->max_score = 0;
+     memset(g_enroll_ctx->max_image, 0, IMAGE_SIZE);
+     memset(g_enroll_ctx->template_data, 0, TEMPLATE_SIZE * TEMPLATE_NUM);
+-    g_enroll_ctx->finger_id = policy_generate_id(user_id);
++    g_enroll_ctx->finger_id = policy_generate_id(user_id); //取得未注册的指纹id
+     return g_enroll_ctx->finger_id;
+ }
+ 
+@@ -609,6 +612,7 @@ static int algorithm121_navigate_direction(uint32_t *navi_result){
+         fft(curReal, curImag, baseReal, baseImag);
+ 
+         // LOGD("end");
++        // 寻找最大的值
+         for ( adr = 0; adr < 4096; adr++ )
+         {
+             if ( curReal[adr] >= maxVal)

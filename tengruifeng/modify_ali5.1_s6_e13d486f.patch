@@ -1,0 +1,143 @@
+diff --git a/fingerprint/client/fingerprintso/fingerprint.c b/fingerprint/client/fingerprintso/fingerprint.c
+index a926583..e3ddfff 100644
+--- a/fingerprint/client/fingerprintso/fingerprint.c
++++ b/fingerprint/client/fingerprintso/fingerprint.c
+@@ -188,8 +188,8 @@ fingerprint_module_t HAL_MODULE_INFO_SYM = {
+ 		.tag                = HARDWARE_MODULE_TAG,
+ 		.module_api_version = FINGERPRINT_MODULE_API_VERSION_2_0,
+ 		.hal_api_version    = HARDWARE_HAL_API_VERSION,
+-		.id                 = FINGERPRINT_HARDWARE_MODULE_ID,
+-//		.id                 = "microarray.fingerprint",
++//		.id                 = FINGERPRINT_HARDWARE_MODULE_ID,
++		.id                 = "microarray.fingerprint",
+ 		.name               = "Microarray Fingerprint HAL",
+ 		.author             = "Microarray",
+ 		.methods            = &fingerprint_module_methods,
+diff --git a/fingerprint/client/libfprint/process/authenticate.c b/fingerprint/client/libfprint/process/authenticate.c
+index 83dd0fe..9b72e2f 100644
+--- a/fingerprint/client/libfprint/process/authenticate.c
++++ b/fingerprint/client/libfprint/process/authenticate.c
+@@ -63,14 +63,14 @@ static int verify(struct cmd_entry *qe)
+         }
+ #endif
+ 
+-#if (defined(PLATFORM_YUNOS) || defined(OEM_YUNOS))
++//#if (defined(PLATFORM_YUNOS) || defined(OEM_YUNOS))
+ 		if(	gAuthCount == g_config.auth_retry_times) {
+ 			LOGD("yunso finger down");
+ 			acquired_event_notify(FINGERPRINT_ACQUIRED_FINGER_DOWN);
+ 			LOGD("yunso finger up");
+ 			acquired_event_notify(FINGERPRINT_ACQUIRED_FINGER_UP);
+ 		}
+-#endif
++//#endif
+ 
+ 		ret = ma_tac_do_verify(&fid_count, &fid, gAuthCount, gHat);
+ 		if (ret == ERROR_WET_FINGER) {
+diff --git a/fingerprint/client/libfprint/process/navigate.c b/fingerprint/client/libfprint/process/navigate.c
+index 7016f07..d21fca7 100644
+--- a/fingerprint/client/libfprint/process/navigate.c
++++ b/fingerprint/client/libfprint/process/navigate.c
+@@ -29,15 +29,15 @@ static int report_navi_result(uint32_t navi_result) {
+         dc_send_cmd(MA_KEY_DOWN);
+         LOGD("report event NAVI DOWN");
+     }else if (navi_result & NAVI_TAP_DOWN) {
+-#ifdef PLATFORM_YUNOS
++//#ifdef PLATFORM_YUNOS
+         acquired_event_notify(FINGERPRINT_ACQUIRED_FINGER_DOWN);
+-#endif
++//#endif
+         dc_send_cmd(TAP_DOWN);
+         LOGD("report event NAVI TAP_DOWN");
+     }else if (navi_result & NAVI_TAP_UP) {
+-#ifdef PLATFORM_YUNOS
++//#ifdef PLATFORM_YUNOS
+         acquired_event_notify(FINGERPRINT_ACQUIRED_FINGER_UP);
+-#endif
++//#endif
+         dc_send_cmd(TAP_UP);
+         LOGD("report event NAVI TAP UP");
+     }
+diff --git a/fingerprint/client/libfprint/utils/notify.c b/fingerprint/client/libfprint/utils/notify.c
+index 2b3b4bf..65236a6 100644
+--- a/fingerprint/client/libfprint/utils/notify.c
++++ b/fingerprint/client/libfprint/utils/notify.c
+@@ -134,6 +134,7 @@ void authenticate_notify(uint32_t gid, uint32_t fid, hw_auth_token_t *token) {
+ 
+ 	if (fid) {
+ 		ma_tac_update_template(gid, fid);
++        bio_cancel();
+ 	}
+ 	fat.acquired_info = FINGERPRINT_ACQUIRED_GOOD;
+ 
+diff --git a/fingerprint/service/soft_sensor/sensor83/sensor_wrapper.c b/fingerprint/service/soft_sensor/sensor83/sensor_wrapper.c
+index 5d16723..5a021ce 100644
+--- a/fingerprint/service/soft_sensor/sensor83/sensor_wrapper.c
++++ b/fingerprint/service/soft_sensor/sensor83/sensor_wrapper.c
+@@ -443,33 +443,33 @@ static int algorithm83_press_detect_texture(void *image, int type) {
+ 	    ret = (sratio > 25) ? NORMAL_PRESSED : NORMAL_UNPRESSED;
+ 	    break;
+ 	}
+-//	if (ret == NORMAL_PRESSED) {
+-//		fp83_remove_bkg(image_in, context_get_sensor83_bkg(),
+-//			g_auth_ctx->remove_bkg_img, g_enroll_ctx->proc_buf, g_sensor83_grey_offset);
+-//		if ((count - g_enroll_ctx->max_count) > (SIZE - g_enroll_ctx->max_count) / 10) {
+-//			memcpy(g_enroll_ctx->max_image, image_in, sizeof(g_enroll_ctx->max_image));
+-//			g_enroll_ctx->max_count = count;
+-//		}
+-//	} else {
+-//	    s_cnt_base = 0;
+-//	    s_cnt_img = 0;
+-//	    g_enroll_ctx->max_count = 0;
+-//	    memset(g_enroll_ctx->max_image, 0, sizeof(g_enroll_ctx->max_image));
+-//	}
+-
+-	if(type==AUTHENTICATE_DETECT) {
+-		ret = select_image(sratio, image_in);
+-	} else {
+-		if(ret==NORMAL_PRESSED) {
+-			fp83_remove_bkg(image_in, context_get_sensor83_bkg(),
+-				g_auth_ctx->remove_bkg_img, g_enroll_ctx->proc_buf, g_sensor83_grey_offset);
+-			if ((count - g_enroll_ctx->max_count) > (SIZE - g_enroll_ctx->max_count) / 10) {
+-				memcpy(g_enroll_ctx->max_image, image_in, sizeof(g_enroll_ctx->max_image));
+-				g_enroll_ctx->max_count = count;
+-			}
++	if (ret == NORMAL_PRESSED) {
++		fp83_remove_bkg(image_in, context_get_sensor83_bkg(),
++			g_auth_ctx->remove_bkg_img, g_enroll_ctx->proc_buf, g_sensor83_grey_offset);
++		if ((count - g_enroll_ctx->max_count) > (SIZE - g_enroll_ctx->max_count) / 10) {
++			memcpy(g_enroll_ctx->max_image, image_in, sizeof(g_enroll_ctx->max_image));
++			g_enroll_ctx->max_count = count;
+ 		}
++	} else {
++	    s_cnt_base = 0;
++	    s_cnt_img = 0;
++	    g_enroll_ctx->max_count = 0;
++	    memset(g_enroll_ctx->max_image, 0, sizeof(g_enroll_ctx->max_image));
+ 	}
+ 
++// 	if(type==AUTHENTICATE_DETECT) {
++// 		ret = select_image(sratio, image_in);
++// 	} else {
++// 		if(ret==NORMAL_PRESSED) {
++// 			fp83_remove_bkg(image_in, context_get_sensor83_bkg(),
++// 				g_auth_ctx->remove_bkg_img, g_enroll_ctx->proc_buf, g_sensor83_grey_offset);
++// 			if ((count - g_enroll_ctx->max_count) > (SIZE - g_enroll_ctx->max_count) / 10) {
++// 				memcpy(g_enroll_ctx->max_image, image_in, sizeof(g_enroll_ctx->max_image));
++// 				g_enroll_ctx->max_count = count;
++// 			}
++// 		}
++// 	}
++
+ 	LOGD("count=%d ratio=%d, ret=%d grey offset=0x%x\n", count, sratio, ret, g_sensor83_grey_offset);
+ 
+ 	return ret;
+@@ -679,7 +679,7 @@ match_again:
+ 	} else {
+ 		if (isMult == 1) {
+ 			isMult = 0;
+-			goto match_again;
++			//goto match_again;
+ 		} else if(count_down==0) { //最后一次尝试失败打印
+             match_save_bmp(ret, char_num);
+ 			LOGD("score=%d, char_num=%d, matchArea=%d score_th=%d, ratio=%d\n",

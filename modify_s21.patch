@@ -1,0 +1,28 @@
+diff --git a/fingerprint/client/libfprint/process/navigate.c b/fingerprint/client/libfprint/process/navigate.c
+index de54135..4a5767f 100644
+--- a/fingerprint/client/libfprint/process/navigate.c
++++ b/fingerprint/client/libfprint/process/navigate.c
+@@ -152,8 +152,8 @@ void * navigate_work(void *q)
+             }
+         }
+         LOGD("down_count = %d", down_count);
+-        navi_result = ma_tac_navigate_direction();
+-        report_navi_result(navi_result);
++        //navi_result = ma_tac_navigate_direction();
++        //report_navi_result(navi_result);
+         if ( qe->cancelled ) {
+             LOGD("command cancelled\n");
+             return NULL;
+diff --git a/version/test.csv b/version/test.csv
+index 965fc3f..41d48ed 100644
+--- a/version/test.csv
++++ b/version/test.csv
+@@ -15,7 +15,7 @@ Default,Android,4.0.00,A83_N,Android,armeabi,Android6.0,Yes,Yes,Yes,No,21,3
+ Default,Android,4.0.00,A80_T,Android,armeabi,Android6.0,Yes,Yes,Yes,No,14,3
+ Default,Android,4.0.00,A80_T&A83_N,Android,armeabi,Android6.0,Yes,Yes,Yes,No,21,3
+ Default,Android,4.0.00,A121_N,Android,arm64-v8a,Ali5.1,Yes,Yes,Yes,No,14,3
+-Default,Android,4.0.00,A120_N,Android,arm64-v8a,Android6.0,Yes,Yes,Yes,No,14,3
++Default,Android,4.0.00,A120_N,Android,arm64-v8a armeabi,Android6.0,Yes,Yes,Yes,No,14,3
+ Default,Android,4.0.00,A120_N,Android,armeabi,Android6.0,Yes,Yes,Yes,No,14,3
+ Default,Android,4.0.00,A120_N,Trustkernel,armeabi,Android6.0,Yes,Yes,Yes,No,14,3
+ Default,Android,4.0.00,A83_N,Android,arm64-v8a,Android6.0,Yes,Yes,Yes,No,21,3

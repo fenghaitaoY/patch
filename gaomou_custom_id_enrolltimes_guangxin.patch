@@ -1,0 +1,36 @@
+diff --git a/fingerprint/client/fingerprintso/fingerprint.c b/fingerprint/client/fingerprintso/fingerprint.c
+index 56d8dad..796fed5 100644
+--- a/fingerprint/client/fingerprintso/fingerprint.c
++++ b/fingerprint/client/fingerprintso/fingerprint.c
+@@ -171,7 +171,7 @@ fingerprint_module_t HAL_MODULE_INFO_SYM = {
+ 		.tag                = HARDWARE_MODULE_TAG,
+ 		.module_api_version = FINGERPRINT_MODULE_API_VERSION_2_0,
+ 		.hal_api_version    = HARDWARE_HAL_API_VERSION,
+-		.id                 = FINGERPRINT_HARDWARE_MODULE_ID,
++		.id                 = "microarray.fingerprint",
+ 		.name               = "Microarray Fingerprint HAL",
+ 		.author             = "Microarray",
+ 		.methods            = &fingerprint_module_methods,
+diff --git a/fingerprint/client/libfprint/process/enrollcalibrate.c b/fingerprint/client/libfprint/process/enrollcalibrate.c
+index 46b60f7..cb149ac 100644
+--- a/fingerprint/client/libfprint/process/enrollcalibrate.c
++++ b/fingerprint/client/libfprint/process/enrollcalibrate.c
+@@ -50,6 +50,7 @@ void* enrollcalibrate_work(void * q)
+         // has finger
+         if (!cancelflag && down) {
+             // enroll
++            acquired_event_notify(FINGERPRINT_ACQUIRED_GOOD);//添加灭屏后触摸指纹亮屏
+             if ( !cancelflag ) {
+                 if(presscount > 0) {
+                     LOGD(" too fast");
+diff --git a/version/test.csv b/version/test.csv
+index 6b208ee..fe5c9c7 100644
+--- a/version/test.csv
++++ b/version/test.csv
+@@ -1,5 +1,5 @@
+ Product,OEM,Version,Support Sensor,Platform,APP ABI,Operation System,Enable Navigation,Return After Authenticate,Filter Duplicate Enroll,Filter Part Touch Enroll,Enroll Times,Auth Retry Times
+-Default,Android,4.0.00,A121_N,Android,arm64-v8a,Android6.0,Yes,Yes,Yes,No,14,3
++Default,Android,4.0.00,A121_N,Android,arm64-v8a armeabi,Android6.0,Yes,Yes,Yes,No,13,3
+ Default,Android,4.0.00,A96_N&A112UM_N,Android,arm64-v8a,Android6.0,Yes,Yes,Yes,No,14,3
+ Default,Android,4.0.00,A121_N,Android,armeabi,Android6.0,Yes,Yes,Yes,No,14,3
+ Default,Android,4.0.00,A96_N&A112UM_N,Android,armeabi,Android6.0,Yes,Yes,Yes,No,14,3

@@ -1,0 +1,43 @@
+diff --git a/fingerprint/client/fingerprintso/fingerprint.c b/fingerprint/client/fingerprintso/fingerprint.c
+index 92fb035..a52d16f 100644
+--- a/fingerprint/client/fingerprintso/fingerprint.c
++++ b/fingerprint/client/fingerprintso/fingerprint.c
+@@ -171,8 +171,8 @@ fingerprint_module_t HAL_MODULE_INFO_SYM = {
+ 		.tag                = HARDWARE_MODULE_TAG,
+ 		.module_api_version = FINGERPRINT_MODULE_API_VERSION_2_0,
+ 		.hal_api_version    = HARDWARE_HAL_API_VERSION,
+-		.id                 = FINGERPRINT_HARDWARE_MODULE_ID,
+-//		.id                 = "microarray.fingerprint",
++//		.id                 = FINGERPRINT_HARDWARE_MODULE_ID,
++		.id                 = "microarray.fingerprint",
+ 		.name               = "Microarray Fingerprint HAL",
+ 		.author             = "Microarray",
+ 		.methods            = &fingerprint_module_methods,
+diff --git a/fingerprint/include/config.h b/fingerprint/include/config.h
+index e23cedc..a5aa0b4 100644
+--- a/fingerprint/include/config.h
++++ b/fingerprint/include/config.h
+@@ -56,7 +56,7 @@ enum navigation_result {
+ //#define TEMPLATE_SIZE 3664
+ #define DEFAULT_ENERGY_THRESHOLD_A120                    1
+ #define DEFAULT_DETECT_THRESHOLD_A120                    128
+-#define DEFAULT_DETECT_THRESHOLD_A120T                   32
++#define DEFAULT_DETECT_THRESHOLD_A120T                   64
+ #define DEFAULT_AUTHENTICATE_SCORE_A120                  75
+ #define DEFAULT_AUTHENTICATE_LEVEL_A120                  4
+ #define DEFAULT_AUTHENTICATE_CHARACTERISTIC_NUM_A120     1
+diff --git a/version/test.csv b/version/test.csv
+index 965fc3f..a24a3da 100644
+--- a/version/test.csv
++++ b/version/test.csv
+@@ -23,8 +23,8 @@ Default,Android,4.0.00,A80_T&A83_N,Android,arm64-v8a,Android6.0,Yes,Yes,Yes,No,2
+ Default,Android,4.0.00,A121_N,Trustonic,arm64-v8a,Android6.0,Yes,Yes,Yes,No,14,3
+ Default,Android,4.0.00,A120_N,Android,armeabi arm64-v8a,Android5.1,Yes,Yes,Yes,No,14,3
+ Default,Android,4.0.00,A121_N,Android,armeabi arm64-v8a,Android5.1,Yes,Yes,Yes,No,14,3
+-Default,Android,4.0.00,A83_N,Android,armeabi arm64-v8a,Android5.1,Yes,Yes,Yes,No,14,3
++Default,Android,4.0.00,A83_N,Android,armeabi arm64-v8a,Android5.1,Yes,Yes,Yes,No,12,3
+ Default,Android,4.0.00,A80_T,Android,armeabi arm64-v8a,Android5.1,Yes,Yes,Yes,No,14,3
+ Default,Android,4.0.00,A96_N&A112UM_N,Android,armeabi arm64-v8a,Android5.1,Yes,Yes,Yes,No,14,3
+-Default,Android,4.0.00,A120_T,Android,armeabi arm64-v8a,Android5.1,Yes,Yes,Yes,No,14,3
++Default,Android,4.0.00,A120_T,Android,armeabi arm64-v8a,Android5.1,Yes,Yes,Yes,No,12,3
+ Default,Android,4.0.00,A120_T,Android,armeabi arm64-v8a,Android6.0,Yes,Yes,Yes,No,14,3

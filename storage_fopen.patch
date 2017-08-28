@@ -1,0 +1,24 @@
+diff --git a/fingerprint/service/platform/android/storage/storage.c b/fingerprint/service/platform/android/storage/storage.c
+index 8d15065..72d4776 100644
+--- a/fingerprint/service/platform/android/storage/storage.c
++++ b/fingerprint/service/platform/android/storage/storage.c
+@@ -102,12 +102,14 @@ static uint32_t __storage_fs_write(const char *name, void *buf, uint32_t size)
+ {
+     FILE *fp;
+ 
+-    fp = fopen(name, "w");
+-    if (fp == 0)
+-    {
+-        LOGE("file %s open fail",  name);
++    fp = fopen(name, "r+");
++    if(fp == 0){
++        fp = fopen(name, "w");
++        if (fp == 0)
++        {
++            LOGE("file %s open fail",  name);
++        }
+     }
+-
+     fwrite(buf, 1, size, fp);
+     fclose(fp);
+ 

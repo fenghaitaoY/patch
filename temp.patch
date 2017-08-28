@@ -1,0 +1,160 @@
+diff --git a/fingerprint/service/malib/Android.mk b/fingerprint/service/malib/Android.mk
+index 90c2eed..de81275 100644
+--- a/fingerprint/service/malib/Android.mk
++++ b/fingerprint/service/malib/Android.mk
+@@ -10,10 +10,10 @@ LOCAL_SRC_FILES := \
+ 	utils/bitmap_header.c \
+ 	utils/malib.c \
+ 	utils/mastring.c \
+-	utils/malog.c 
+-	#utils/masnprintf.c \
+-	#utils/bitmap.c\
+-	#pgm/pgm.c
++	utils/malog.c \
++	utils/masnprintf.c \
++	utils/bitmap.c\
++	pgm/pgm.c
+ 
+ LOCAL_MODULE := malib
+ 
+diff --git a/fingerprint/service/soft_sensor/sensor83/sensor_wrapper.c b/fingerprint/service/soft_sensor/sensor83/sensor_wrapper.c
+index f0a8ca9..bd1c575 100644
+--- a/fingerprint/service/soft_sensor/sensor83/sensor_wrapper.c
++++ b/fingerprint/service/soft_sensor/sensor83/sensor_wrapper.c
+@@ -316,7 +316,7 @@ static int algorithm83_press_detect_texture(void *image, int type) {
+ 	    ret = (sratio > 40) ? NORMAL_PRESSED : NORMAL_UNPRESSED;
+ 	    break;
+ 	case ENROLL_DETECT:
+-	    ret = (sratio > 60) ? NORMAL_PRESSED : NORMAL_UNPRESSED;
++	    ret = (sratio > 80) ? NORMAL_PRESSED : NORMAL_UNPRESSED;
+ 	    break;
+ 	case PRESS_DETECT:
+ 	    ret = (sratio > 25) ? NORMAL_PRESSED : NORMAL_UNPRESSED;
+@@ -329,6 +329,7 @@ static int algorithm83_press_detect_texture(void *image, int type) {
+ 	    ret = (sratio > 25) ? NORMAL_PRESSED : NORMAL_UNPRESSED;
+ 	    break;
+ 	}
++    LOGD("----------------count = %d, sratio = %d, ret = %d",count,sratio, ret);
+ 	if (ret == NORMAL_PRESSED) {
+ 	    fp83_remove_bkg(image_in, context_get_sensor83_bkg(),
+ 	            g_auth_ctx->remove_bkg_img, g_enroll_ctx->proc_buf, g_sensor83_grey_offset);
+@@ -410,6 +411,7 @@ static void match_save_bmp(int val, int char_num) {
+ static int do_match_result(int snum, int score, int area, int tempn) {
+ 	int ret = 0;
+ 
++    LOGD("------------------------snum = %d, score = %d, area = %d, tempn = %d ", snum, score, area, tempn);
+ 	if(tempn<=20) {
+ 		if(score > g_config.auth_score) ret = 1;
+ 	} else if(tempn>20 && tempn<=35) {
+@@ -457,7 +459,7 @@ static int algorithm83_authenticate(int *fid_count) {
+ 	int isMult = 1, count_down = *fid_count;
+ 	char_num = alg83_extract(g_auth_ctx->remove_bkg_img);
+ 	if(char_num == 0) {
+-	    LOGE("extract character fail.");
++	    LOGE("----------extract character fail.");
+ 	}
+ 	policy_enumerate_fingerid(fidlist, &pre_len);
+ 	*fid_count = pre_len;
+@@ -471,6 +473,7 @@ match_again:
+ 		//注意：afs_match改变了src内数据
+ 		val = alg83_match(tmp_data, TEMPLATE_NUM_A83, &score, &area, &temp_idx, s_update_flag, isMult);
+ 		temp_num = alg83_getState(tmp_data, TEMPLATE_NUM_A83);
++        LOGD("---------------------char_num = %d, score = %d, area = %d, temp_idx = %d, temp_num =%d", char_num,score,area,temp_idx, temp_num);
+ 		if (do_match_result(char_num, score, area, temp_num)) { //匹配成功条件
+ 			if (score > last_score) { //更新条件
+ 				memcpy(max_data, tmp_data, sizeof(g_enroll_ctx->tmp_template));
+@@ -483,21 +486,21 @@ match_again:
+ 			}
+ 		}
+ 	}
++	match_save_bmp(ret, char_num);
+ 
+ 	if (ret != 0) {
+-		LOGD("score=%d, char_num=%d, matchArea=%d score_th=%d, temp_idx=%d, temp_num=%d ratio=%d isMult=%d\n",
++		LOGD("------score=%d, char_num=%d, matchArea=%d score_th=%d, temp_idx=%d, temp_num=%d ratio=%d isMult=%d\n",
+ 			last_score, char_num, last_area, g_config.auth_score, last_temp_idx, last_temp_num, sratio, isMult);
+-		match_save_bmp(ret, char_num);
+ 		LOGD("match successfully.");
+ 	} else {
+ 		if (isMult == 1) {
+ 			isMult = 0;
+-			//goto match_again;
++			goto match_again;
+ 		} else if(count_down==0) { //最后一次尝试失败打印
+-			match_save_bmp(ret, char_num);
+-			LOGD("score=%d, char_num=%d, matchArea=%d score_th=%d, ratio=%d\n",
++			//match_save_bmp(ret, char_num);
++			LOGD("------score=%d, char_num=%d, matchArea=%d score_th=%d, ratio=%d\n",
+ 				score, char_num, area, g_config.auth_score, sratio);
+-			LOGD("match failed.");
++			LOGD("------match failed.");
+ 		}
+ 	}
+ 	if (do_match_update(char_num, last_score, last_area, last_temp_num)) { //更新模板
+@@ -525,7 +528,7 @@ static int algorithm83_enroll_start(uint64_t user_id) {
+ }
+ 
+ static void enroll_save_bmp(int val) {
+-#ifdef SAVE83_FILE
++//#ifdef SAVE83_FILE
+ 	char name[128];
+ 	static int num = 0;
+ 	unsigned char *enroll_image = (unsigned char *)context_get_img_buf();
+@@ -556,7 +559,7 @@ static void enroll_save_bmp(int val) {
+ 		LOGD("reset num");
+ 	}
+ 
+-#endif
++//#endif
+ }
+ 
+ /* 注册
+@@ -577,6 +580,7 @@ static int algorithm83_enroll(void) {
+ 	memcpy(g_auth_ctx->remove_bkg_img, enroll_image, IMAGE_SIZE);
+ 	char_num = alg83_extract(g_auth_ctx->remove_bkg_img);
+ 	enroll_save_bmp(char_num);
++    LOGD("---------------enroll -------char_num = %d", char_num);
+ 	if (char_num < 1) {
+ 		LOGD("extract failed. char_num=%d\n", char_num);
+ 		s_update_flag = 1;
+@@ -596,7 +600,7 @@ static int algorithm83_enroll(void) {
+ 	}
+ 
+ 	ret = alg83_enroll(g_enroll_ctx->template_data, TEMPLATE_NUM_A83, &area, &temp_idx);
+-	LOGD("enroll ret=%d, emptyArea=%d char_num=%d temp_num=%d ratio=%d",
++	LOGD("--------enroll ret=%d, emptyArea=%d char_num=%d temp_num=%d ratio=%d",
+ 			ret, area, char_num, temp_idx, sratio);
+ 
+ 	s_update_flag = 1;
+diff --git a/fingerprint/service/soft_sensor/sensor96/sensor_wrapper.c b/fingerprint/service/soft_sensor/sensor96/sensor_wrapper.c
+index fe1cd90..b90c32f 100644
+--- a/fingerprint/service/soft_sensor/sensor96/sensor_wrapper.c
++++ b/fingerprint/service/soft_sensor/sensor96/sensor_wrapper.c
+@@ -528,7 +528,7 @@ static int algorithm96_enroll(void) {
+         memset(g_enroll_ctx->max_image, 0, sizeof(g_enroll_ctx->max_image));
+         return ERROR_EXTRACT_FAIL;
+     }
+-    if(g_config.filter_duplicate_enroll) {
++    /*if(g_config.filter_duplicate_enroll) {
+         if ( algorithm96_authenticate(&fid_count) ) { //注册时的验证fid_count为-1；匹配时的验证fidcount为0._
+             LOGD("duplicate finger.");
+             //清除max_image
+@@ -537,7 +537,7 @@ static int algorithm96_enroll(void) {
+             memset(g_enroll_ctx->max_image, 0, sizeof(g_enroll_ctx->max_image));
+             return ERROR_ENROLL_DUPLICATE_FINGER;
+         }
+-    }
++    }*/
+ 
+     ret = alg96_enroll(g_enroll_ctx->template_data, TEMPLATE_NUM_A96, &area, &temp_idx);
+     LOGD("enroll ret=%d, emptyArea=%d char_num=%d temp_num=%d ratio=%d", ret, area, char_num, temp_idx, sratio);
+@@ -551,7 +551,8 @@ static int algorithm96_enroll(void) {
+             return ERROR_ENROLL_PART_TOUCH;
+         } else {
+             LOGD("end. duplicate area.");
+-            return ERROR_ENROLL_DUPLICATE_AREA;
++            if(g_init_enroll == 1) g_init_enroll = 0;
++            //return ERROR_ENROLL_DUPLICATE_AREA;
+         }
+     } else {
+         if(g_init_enroll == 1) g_init_enroll = 0;

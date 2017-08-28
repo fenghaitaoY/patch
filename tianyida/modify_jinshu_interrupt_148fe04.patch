@@ -1,0 +1,114 @@
+diff --git a/fingerprint/client/libfprint/process/authenticate.c b/fingerprint/client/libfprint/process/authenticate.c
+index 9e6b72c..6f1401a 100644
+--- a/fingerprint/client/libfprint/process/authenticate.c
++++ b/fingerprint/client/libfprint/process/authenticate.c
+@@ -77,7 +77,11 @@ static int verify(struct cmd_entry *qe)
+ 			LOGE("wet finger");
+ 		} else if (ret != 0) {
+ 			LOGE("do_verify call function failed\n");
+-			return 0;
++			//return 0;
++            if(ret == ERROR_EXTRACT_FAIL){
++                LOGD("---------------------------非手指--------");
++                //return 0;
++            }
+ 		}
+ 		if (fid) {
+ 			dc_send_cmd(TIMEOUT_WAKELOCK);
+@@ -90,7 +94,7 @@ static int verify(struct cmd_entry *qe)
+ 		r = ma_tac_detect_touch();
+ 		LOGD("detect_touch ret=%d", r);
+ 
+-		if (r == NORMAL_UNPRESSED || r == ERROR_EXTRACT_FAIL) break;
++		if (r == NORMAL_UNPRESSED || ret == ERROR_EXTRACT_FAIL) break;
+ 
+ 	} while(gAuthCount-- > 0 && !fid);
+ 
+@@ -106,7 +110,7 @@ static int verify(struct cmd_entry *qe)
+ 	    authenticate_notify(cmd_auth->gid, fid, gHat);
+ 	}
+ #else
+-	if (!fid && fid_count && r!=ERROR_EXTRACT_FAIL) {
++	if (!fid && fid_count && ret!=ERROR_EXTRACT_FAIL) {
+ 		dc_send_cmd(TIMEOUT_WAKELOCK);
+ 		authenticate_notify(cmd_auth->gid, fid, gHat);
+ 	}
+diff --git a/fingerprint/service/soft_sensor/sensor83/sensor_wrapper.c b/fingerprint/service/soft_sensor/sensor83/sensor_wrapper.c
+index 4f37328..127f2c2 100644
+--- a/fingerprint/service/soft_sensor/sensor83/sensor_wrapper.c
++++ b/fingerprint/service/soft_sensor/sensor83/sensor_wrapper.c
+@@ -62,7 +62,6 @@ static int s_cnt_img = 0;
+ #ifdef TAC_DEBUG_SAVE_FILE
+ static int g_src_enroll_image[IMAGE_SIZE];
+ #endif
+-
+ /*************************** PRIVATE FUNCTION ********************/
+ /* 获取产品码，如MA96等
+  * @product_id 产品码
+@@ -426,21 +425,8 @@ static int algorithm83_press_detect_texture(void *image, int type) {
+ 	    break;
+ 	}
+ 	if (ret == NORMAL_PRESSED) {
+-        LOGD("press detect texture   remove bkg image--count = %d, SIZE = %d",count, SIZE);
+-        if(g_auth_ctx->temp_count < count){
+-            g_auth_ctx->temp_count = count;
+-            memcpy(g_auth_ctx->temp_image, image_in, sizeof(g_auth_ctx->max_image));
+-        }
+-
+-        if(g_auth_ctx->max_count < g_auth_ctx->temp_count){
+-            memcpy(g_auth_ctx->max_image, g_auth_ctx->temp_image,sizeof(g_auth_ctx->max_image));
+-            g_auth_ctx->max_count = g_auth_ctx->temp_count;
+-        }
+-
+-        LOGD(" count = %d, temp_count = %d, max_count = %d",count,g_auth_ctx->temp_count,g_auth_ctx->max_count);
+-        fp83_remove_bkg(g_auth_ctx->max_image, context_get_sensor83_bkg(),
+-                g_auth_ctx->remove_bkg_img, g_enroll_ctx->proc_buf, g_sensor83_grey_offset);
+-
++		fp83_remove_bkg(image_in, context_get_sensor83_bkg(),
++			g_auth_ctx->remove_bkg_img, g_enroll_ctx->proc_buf, g_sensor83_grey_offset);
+ 		if ((count - g_enroll_ctx->max_count) > (SIZE - g_enroll_ctx->max_count) / 10) {
+ 			memcpy(g_enroll_ctx->max_image, image_in, sizeof(g_enroll_ctx->max_image));
+ 			g_enroll_ctx->max_count = count;
+@@ -450,25 +436,6 @@ static int algorithm83_press_detect_texture(void *image, int type) {
+ 	    s_cnt_img = 0;
+ 	}
+ 
+-//	if(type==AUTHENTICATE_DETECT) {
+-//		ret = select_good_image(sratio, image_in);
+-//	} else {
+-//		fp83_remove_bkg(image_in, context_get_sensor83_bkg(),
+-//			g_auth_ctx->remove_bkg_img, g_enroll_ctx->proc_buf, g_sensor83_grey_offset);
+-//		if ((count - g_enroll_ctx->max_count) > (SIZE - g_enroll_ctx->max_count) / 10) {
+-//			memcpy(g_enroll_ctx->max_image, image_in, sizeof(g_enroll_ctx->max_image));
+-//			g_enroll_ctx->max_count = count;
+-//		}
+-//	}
+-
+-    if(ret == NORMAL_UNPRESSED){
+-        LOGD("unpress memset image");
+-        g_auth_ctx->max_count  = 0;
+-        g_auth_ctx->temp_count  = 0;
+-        memset(g_auth_ctx->max_image, 0, sizeof(g_auth_ctx->max_image));
+-        memset(g_auth_ctx->temp_image, 0, sizeof(g_auth_ctx->max_image));
+-    }
+-
+ 	LOGD("count=%d ratio=%d, ret=%d grey offset=0x%x\n", count, sratio, ret, g_sensor83_grey_offset);
+ 
+ 
+@@ -679,6 +646,7 @@ match_again:
+ 				last_temp_num = temp_num;
+ 				last_temp_idx = temp_idx;
+ 			}
++            break;
+ 		}
+ 	}
+ 
+@@ -690,7 +658,7 @@ match_again:
+ 	} else {
+ 		if (isMult == 1) {
+ 			isMult = 0;
+-			goto match_again;
++			//goto match_again;
+ 		} else if(count_down==0) { //最后一次尝试失败打印
+ 			match_save_bmp(ret, char_num);
+ 			LOGD("score=%d, char_num=%d, matchArea=%d score_th=%d, ratio=%d\n",

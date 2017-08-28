@@ -1,0 +1,30 @@
+diff --git a/buildenv/service/trustkernel/make.sh b/buildenv/service/trustkernel/make.sh
+index 6969c48..148aa7b 100755
+--- a/buildenv/service/trustkernel/make.sh
++++ b/buildenv/service/trustkernel/make.sh
+@@ -13,7 +13,7 @@ gcc_path="$binpath/gcc-linaro-6.1.1-2016.08-i686_arm-linux-gnueabihf/bin/"
+ export TA_KIT=`pwd`/ta_kit
+ export PATH=$PATH:$gcc_path
+ 
+-make
++make RELEASE=1
+ 
+ [ ! -d ../target/system/app/t6/ ] && mkdir -p ../target/system/app/t6/
+-cp out/edcf9395-3518-9067-614cafae2909775b.ta ../target/system/app/t6/
+\ No newline at end of file
++cp out/edcf9395-3518-9067-614cafae2909775b.ta ../target/system/app/t6/
+diff --git a/fingerprint/service/soft_sensor/sensor121/algorithm/detect.c b/fingerprint/service/soft_sensor/sensor121/algorithm/detect.c
+index bafb5a6..9951d1a 100644
+--- a/fingerprint/service/soft_sensor/sensor121/algorithm/detect.c
++++ b/fingerprint/service/soft_sensor/sensor121/algorithm/detect.c
+@@ -98,7 +98,9 @@ int fp121_press_detect_texture(uint8_t *imgBuf, int parTH, int *rangeWeight)
+     *rangeWeight = afs121_corrWeight(imgBuf);
+     LOGD("curTH=%d, rangeWeight=%d\n", curTH, *rangeWeight);
+     if (*rangeWeight > curTH) {
+-        return 1;
++        if(*rangeWeight > 4*curTH){
++            return 1;
++        }
+     }
+     return 0;
+ }

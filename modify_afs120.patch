@@ -1,0 +1,477 @@
+diff --git a/buildenv/public/prebuild.mk b/buildenv/public/prebuild.mk
+index 44bae35..9830840 100644
+--- a/buildenv/public/prebuild.mk
++++ b/buildenv/public/prebuild.mk
+@@ -123,10 +123,10 @@ LOCAL_PATH:= $(call my-dir)
+ 
+ include $(CLEAR_VARS)
+ ifneq ($(filter A121,$(sensor))$(filter A120,$(sensor)),)
+-    LOCAL_SRC_FILES := prebuild/android/libafs120-$(LIB_SUFFIX).a
++    LOCAL_SRC_FILES := prebuild/android/libalg120-$(LIB_SUFFIX).a
+     LOCAL_MODULE := afs120
+ else
+-    LOCAL_SRC_FILES := prebuild/android/libafs120-$(LIB_SUFFIX).a
++    LOCAL_SRC_FILES := prebuild/android/libalg120-$(LIB_SUFFIX).a
+     LOCAL_MODULE := null
+ endif
+ ifneq ($(LOCAL_MODULE), null)
+diff --git a/fingerprint/include/config.h b/fingerprint/include/config.h
+index d8c0fd0..0a6a801 100644
+--- a/fingerprint/include/config.h
++++ b/fingerprint/include/config.h
+@@ -62,6 +62,7 @@ enum navigation_result {
+ #define DEFAULT_AUTHENTICATE_SCORE_A120                  75
+ #define DEFAULT_AUTHENTICATE_LEVEL_A120                  4
+ #define DEFAULT_AUTHENTICATE_CHARACTERISTIC_NUM_A120     1
++#define TEMPLATE_NUM_A83                                100
+ #endif
+ 
+ #ifdef A96
+diff --git a/fingerprint/service/policy/policy.c b/fingerprint/service/policy/policy.c
+index c75e3e3..9fd4f9e 100644
+--- a/fingerprint/service/policy/policy.c
++++ b/fingerprint/service/policy/policy.c
+@@ -171,7 +171,7 @@ int policy_init_template(char* head, int fp_temp_size)
+ 	}
+ #endif
+ #endif
+-	LOGD("================================================");
++	LOGD("=============end===================================");
+ 	return ret;
+ }
+ 
+diff --git a/fingerprint/service/soft_sensor/sensor120/algorithm/afs120.h b/fingerprint/service/soft_sensor/sensor120/algorithm/afs120.h
+index cc90946..538a91b 100644
+--- a/fingerprint/service/soft_sensor/sensor120/algorithm/afs120.h
++++ b/fingerprint/service/soft_sensor/sensor120/algorithm/afs120.h
+@@ -5,8 +5,8 @@
+  *      Author: lyy
+  */
+ 
+-#ifndef AFS120_H_
+-#define AFS120_H_
++#ifndef ALG120_H_
++#define ALG120_H_
+ 
+ /* 分配内存
+  * @return 成功1， 失败0
+@@ -23,41 +23,53 @@ extern int afs_free(void);
+  * @out 增强图
+  * @return 指纹质量分数
+  */
+-extern int afs_enhance(void *src, void *out);
++extern int alg120_enhance(void *src, void *out);
++
++/* 提取图像特征模板
++ * @src
++ * @return 特征点个数
++ */
++extern int alg120_extract(void *src);
+ 
+ /* 注册
+- * @src 数据(传入数据改变内部改变)
+  * @temp 指纹模版
+  * @tnum 指纹模板个数
+- * @return -1参数错误，0失败，>0正确
++ * @emptyArea 未重叠区域
++ * @return （0～10）注册分数
++ * 		   -1 参数错误
+  */
+-extern int afs_enroll(void *src, void *temp, int tnum);
++extern int alg120_enroll(int *temp, int tnum, int *emptyArea);
+ 
+-/* 匹配
+- * @src 数据
+- * @temp 指纹模版
+- * @tnum 指纹模板个数
+- * @level 等级1~5由低到高
+- * @score 匹配分数
+- * @snum 匹配模板个数
+- * @return -1参数错误，0失败，>0正确
++/* 功能: 匹配指纹
++ * @temp 指纹模板
++ * @tnum 单个指纹最大模板数
++ * @matchArea 重叠区域(输入为匹配面积阀值，输出未匹配面积
++ * @update 更新指纹模板标志
++ * @return 匹配分数
++ * 		 	-1 参数错误
+  */
+-extern int afs_match(void *src, void *temp, int tnum, int level, int *score, int *snum);
++extern int alg120_match(int *temp, int tnum, int *score, int *matchArea, int update);
+ 
+ /* 清除
+  * @tnum 指纹模板个数
+- * @tnum 指纹ID
+- * @return -1参数错误，0成功
++ * @return 0成功
++ * 			-1参数错误
+  */
+-extern int afs_clear(void *temp, int tnum);
++extern int alg120_clear(int *temp, int tnum);
+ 
+ /* 检测注册状态
+  * @temp 每个手指模版指针
+  * @size 每个手指模版大小
+  * @return 注册模版数
+  */
+-extern int afs_getState(void *temp, int tnum);
++extern int alg120_getState(int *temp, int tnum);
++
++#endif /* ALG120_H_ */
++
++
++
++
++
+ 
+ 
+-#endif /* AFS120_H_ */
+ 
+diff --git a/fingerprint/service/soft_sensor/sensor120/sensor120_config.h b/fingerprint/service/soft_sensor/sensor120/sensor120_config.h
+index 23cb15d..3af1372 100644
+--- a/fingerprint/service/soft_sensor/sensor120/sensor120_config.h
++++ b/fingerprint/service/soft_sensor/sensor120/sensor120_config.h
+@@ -8,13 +8,14 @@
+ #define IMAGE_H     120
+ #define IMAGE_SIZE (IMAGE_W*IMAGE_H)
+ #define TEMPLATE_SIZE 3664
++#define TEMPLATE_SIZE_A83  6656
+ struct fp_template {
+ 	uint32_t used; // 是否已经
+ 	uint32_t fid; // 注册是生成的随机数
+ 	uint32_t match_pass_count; // 当前对应的匹配成功次数
+ 	uint64_t user_id;
+ 	char name[NAME_LENGTH]; // 指纹名-传入
+-	uint8_t data[TEMPLATE_SIZE * TEMPLATE_NUM]; // 模版数据-传入
++	uint8_t data[TEMPLATE_SIZE_A83 * TEMPLATE_NUM_A83 +1]; // 模版数据-传入
+ };
+ 
+ #endif
+diff --git a/fingerprint/service/soft_sensor/sensor120/sensor_wrapper.c b/fingerprint/service/soft_sensor/sensor120/sensor_wrapper.c
+index 7a4c391..5b30a0e 100644
+--- a/fingerprint/service/soft_sensor/sensor120/sensor_wrapper.c
++++ b/fingerprint/service/soft_sensor/sensor120/sensor_wrapper.c
+@@ -18,15 +18,20 @@
+ #include "policy.h"
+ static struct fp_template template[FINGERPRINT_SIZE];
+ 
++static int g_init_enroll = 1;
++static int s_update_flag = 1;
++
+ typedef struct enroll_context
+ {
+     uint32_t finger_id;
+ 
+     int max_score;
++    int max_count;
+     unsigned char max_image[IMAGE_SIZE];
+-    unsigned char tmp_template[TEMPLATE_SIZE*TEMPLATE_NUM];
+-    unsigned char template_data[TEMPLATE_SIZE*TEMPLATE_NUM];
+-    unsigned char test_template_data[TEMPLATE_SIZE*TEMPLATE_NUM];
++    unsigned char tmp_template[TEMPLATE_SIZE_A83 * TEMPLATE_NUM_A83 + 1];
++    unsigned char template_data[TEMPLATE_SIZE_A83 * TEMPLATE_NUM_A83 + 1];
++    unsigned char test_template_data[TEMPLATE_SIZE_A83 * TEMPLATE_NUM_A83 + 1];
++
+ } enroll_context_t;
+ 
+ typedef struct authenticate_context
+@@ -250,10 +255,10 @@ static int sensor120_create(microarray_properties_t *config)
+     g_auth_ctx = malloc(sizeof(authenticate_context_t));
+     g_navi_ctx = malloc(sizeof(navigation_context_t));
+ 
+-    ret = afs_malloc();
++    /*ret = afs_malloc();
+     if ( ret == 0 ) {
+         return ERROR_AFS_MALLOC_FAIL;
+-    }
++    }*/
+ 
+     ret = init_sensor120_context();
+     if ( ret ) {
+@@ -294,7 +299,7 @@ static int sensor120_create(microarray_properties_t *config)
+  */
+ static int sensor120_destory(void)
+ {
+-    afs_free();
++    //afs_free();
+     free(g_enroll_ctx);
+     free(g_auth_ctx);
+     free(g_navi_ctx);
+@@ -373,6 +378,22 @@ static int algorithm120_get_energy(void *image_in)
+     return ret;
+ }
+ 
++static int do_match_result(int snum, int score, int area) {
++    int ret = 0;
++    if(score>g_config.auth_score) {
++        if(area>320) ret = 1;
++    }
++    return ret;
++}
++
++static int do_match_update(int snum, int score, int area) {
++    int ret=0;
++    if(score>g_config.update_score) {
++         if(area>420) ret = 1;
++     }
++    return ret;
++}
++
+ /* 验证
+  * @fid_count:现有指纹数量
+  * @return  >0:验证成功的fid
+@@ -380,40 +401,63 @@ static int algorithm120_get_energy(void *image_in)
+  */
+ static int algorithm120_authenticate(int *fid_count)
+ {
+-
+-    int val=0, ret=0;
+-    int len=0, score=0, snum=0;
+-    unsigned char *tmp_img = (unsigned char *)context_get_img_buf();
++    const int areaTH = 320;
++    int val=0, ret=0, temp_num;
++    int len=0, score=0, area=0, char_num=0;
++    int last_len=-1, last_score=0, last_area=0;
+     uint32_t fidlist[FINGERPRINT_SIZE];
+-    unsigned char *template_data = g_enroll_ctx->tmp_template;
+-    memset(template_data, 0, TEMPLATE_SIZE*TEMPLATE_NUM);
++    int *tmp_data = g_enroll_ctx->tmp_template;
++    int *max_data = g_enroll_ctx->test_template_data;
++
++    memset(tmp_data, 0, sizeof(g_enroll_ctx->tmp_template));
++    memset(max_data, 0, sizeof(g_enroll_ctx->test_template_data));
++    char_num = alg120_extract((int *)g_auth_ctx->remove_bkg_img);
+ 
+-    memcpy(tmp_img, g_auth_ctx->remove_bkg_img, IMAGE_SIZE);
+     //1.enumate template
+     policy_enumerate_fingerid(fidlist, &len);
+     *fid_count = len;
+     //2.authenticate
+     while ( len-- )
+     {
+-        policy_get_template_data(fidlist[len], template_data);
++        area = areaTH;
++        policy_get_template_data(fidlist[len], tmp_data);
+         //注意：afs_match改变了src内数据
+ #ifdef _SAVE_READ_IMAGE
+ 	{
+ 		static int count=0;
+ 		char name[100]={0};
+ 		sprintf(name, "/data/system/users/0/fpdata/match_in_%.5d.bmp", count++);
+-		save_bmp_file(name, tmp_img, IMAGE_W, IMAGE_H);
++		save_bmp_file(name, g_auth_ctx->remove_bkg_img, IMAGE_W, IMAGE_H);
+ 	}
+ #endif
+-        val = afs_match(tmp_img, template_data, TEMPLATE_NUM, g_config.auth_level, &score, &snum);
+-        LOGD("score=%d, characteristic_num=%d, score_threshold=%d, characteristic_threshold=%d, val=%d.\n",
+-             score, snum, g_config.auth_score, g_config.auth_characteristic_num, val);
+-        if (score > g_config.auth_score && snum > g_config.auth_characteristic_num) {
+-            policy_update_template_data(fidlist[len], template_data);
+-            ret = fidlist[len];
+-            break;
++        val = alg120_match(tmp_data, TEMPLATE_NUM_A83, &score, &area, s_update_flag);
++        temp_num = alg120_getState(tmp_data, TEMPLATE_NUM_A83);
++
++        if(do_match_result(char_num, score, area)){
++            LOGD("score=%d, char_num=%d, matchArea=%d score_th=%d, char_th=%d, temp_num=%d\n",
++                    score, char_num, area, g_config.auth_score, g_config.auth_characteristic_num, temp_num);
++            if(score > last_score) {//更新条件
++                memcpy(max_data, tmp_data, sizeof(g_enroll_ctx->tmp_template));
++                ret = fidlist[len];
++                last_len = len;
++                last_score = score;
++                last_area = area;
++            }
+         }
+     }
++
++    if(ret>0) {
++        LOGD("match successfully.");
++    } else {
++        LOGD("score=%d, char_num=%d, matchArea=%d score_th=%d, char_th=%d, temp_num=%d\n",
++                score, char_num, area, g_config.auth_score, g_config.auth_characteristic_num, temp_num);
++        LOGD("match failed.");
++    }
++    if(do_match_update(char_num, last_score, last_area) ) { //更新模板
++        policy_update_template_data(fidlist[last_len], max_data);
++        LOGD("update template.\n");
++    }
++    memset(max_data, 0, sizeof(g_enroll_ctx->test_template_data));
+     //3.return
+     return ret;
+ }
+@@ -423,10 +467,11 @@ static int algorithm120_authenticate(int *fid_count)
+  */
+ static int algorithm120_enroll_start(uint64_t user_id)
+ {
+-    g_enroll_ctx->max_score = 0;
+-    memset(g_enroll_ctx->max_image, 0, IMAGE_SIZE);
+-    memset(g_enroll_ctx->template_data, 0, TEMPLATE_SIZE * TEMPLATE_NUM);
++    g_enroll_ctx->max_count = 0;
++    memset(g_enroll_ctx->max_image, 0, sizeof(g_enroll_ctx->max_image));
++    memset(g_enroll_ctx->template_data, 0, sizeof(g_enroll_ctx->template_data));
+     g_enroll_ctx->finger_id = policy_generate_id(user_id);
++    g_init_enroll = 1;
+     return g_enroll_ctx->finger_id;
+ }
+ 
+@@ -437,18 +482,25 @@ static int algorithm120_enroll_start(uint64_t user_id)
+ 
+ static int algorithm120_enroll(void)
+ {
+-    int ret = SUCCESS, fid_count = 0;
++    int ret = SUCCESS, fid_count = -1, temp_num=0, char_num=0, area=-1;
+     unsigned char *enroll_image = (unsigned char *)context_get_img_buf();
+ 
++    s_update_flag = 0;
+     fp120_remove_bkg(g_enroll_ctx->max_image, context_get_sensor120_bkg(), enroll_image);
+-
+-    if( g_config.filter_duplicate_enroll )
+-    {
+-        memcpy(g_auth_ctx->remove_bkg_img, enroll_image, IMAGE_SIZE);
+-        if ( algorithm120_authenticate(&fid_count) )
+-        {
+-            g_enroll_ctx->max_score = 0;
++    memcpy(g_auth_ctx->remove_bkg_img, enroll_image, IMAGE_SIZE);
++    char_num = alg120_extract((int *)g_auth_ctx->remove_bkg_img);
++    if(char_num<2){
++        s_update_flag = 1;
++        g_enroll_ctx->max_count = 0;
++        memset(g_enroll_ctx->max_image,0,sizeof(g_enroll_ctx->max_image));
++        return ERROR_ENROLL_FAIL;
++    }
++    if( g_config.filter_duplicate_enroll ){
++        if ( algorithm120_authenticate(&fid_count) ){
+             LOGD("duplicate finger.");
++            s_update_flag = 1;
++            g_enroll_ctx->max_count = 0;
++            memset(g_enroll_ctx->max_image, 0, sizeof(g_enroll_ctx->max_image));
+             return ERROR_ENROLL_DUPLICATE_FINGER;
+         }
+     }
+@@ -471,15 +523,26 @@ sprintf(name, "/data/system/users/0/fpdata/enroll_src_%.5d.bmp", count);
+ 		count++;}
+ 	}
+ #endif
+-	ret = afs_enroll(enroll_image, g_enroll_ctx->template_data, TEMPLATE_NUM);
+-	if (ret <= 0 && g_enroll_ctx->max_score != 0) {
+-		g_enroll_ctx->max_score = 0;
+-		memset(g_enroll_ctx->max_image, 0, IMAGE_SIZE);
+-		return ERROR_ENROLL_DUPLICATE_AREA;
+-	} else {
+-		g_enroll_ctx->max_score = ret;
+-		memset(g_enroll_ctx->max_image, 0, IMAGE_SIZE);
+-	}
++
++    ret = alg120_enroll((int *)g_enroll_ctx->template_data, TEMPLATE_NUM_A83, &area);
++    temp_num = alg120_getState((int *)g_enroll_ctx->template_data, TEMPLATE_NUM_A83);
++    LOGD("enroll ret=%d, emptyArea=%d char_num=%d temp_num=%d ", ret, area, char_num, temp_num);
++
++    s_update_flag = 1;
++    g_enroll_ctx->max_count = 0;
++    memset(g_enroll_ctx->max_image, 0, sizeof(g_enroll_ctx->max_image));
++
++    if(ret < 2) {
++        if(g_init_enroll == 1) { //第一次注册区域失败不能报重复区域，只能报部分手指
++            LOGD("end. bad image.");
++            return ERROR_ENROLL_FAIL;
++        } else {
++            LOGD("end. duplicate area.");
++            return ERROR_ENROLL_DUPLICATE_AREA;
++        }
++    } else {
++        if(g_init_enroll == 1) g_init_enroll = 0;
++    }
+     LOGD("end.");
+     return SUCCESS;
+ }
+@@ -629,17 +692,20 @@ static int sensor120_factory_test_press(void)
+  */
+ static int sensor120_factory_test_enroll(void)
+ {
+-    int ret = SUCCESS;
++    int ret = SUCCESS, snum = -1, area = -1, temp_num = 0;
+     unsigned char *enroll_image = (unsigned char *)context_get_img_buf();
+     LOGD("start.\n");
+     fp120_remove_bkg(g_enroll_ctx->max_image, context_get_sensor120_bkg(), enroll_image);
+-    ret = afs_enroll(enroll_image, g_enroll_ctx->test_template_data, TEST_TEMPLATE_NUM);
+-    g_enroll_ctx->max_score = 0;
+-    memset(g_enroll_ctx->max_image, 0, IMAGE_SIZE);
++    snum = alg120_extract((int *)enroll_image);
++    ret = alg120_enroll((int *)g_enroll_ctx->test_template_data, TEMPLATE_NUM_A83, &area);
++    temp_num = alg120_getState((int *)g_enroll_ctx->test_template_data, TEMPLATE_NUM_A83);
++    g_enroll_ctx->max_count = 0;
++    memset(g_enroll_ctx->max_image, 0, sizeof(g_enroll_ctx->max_image));
++    ret = ret<=2? 0: ret;
+     if (ret == 0) {
+-        return ERROR_ENROLL_DUPLICATE_AREA;
+-    }
+-    LOGD("end.\n");
++            return ERROR_ENROLL_DUPLICATE_AREA;
++        }
++    LOGD("end. enroll snum=%d area=%d temp_num=%d ret=%d\n", snum, area, temp_num, ret);
+     return ret;
+ }
+ 
+@@ -649,30 +715,28 @@ static int sensor120_factory_test_enroll(void)
+  */
+ static int sensor120_factory_test_authenticate(void)
+ {
+-    int val=0;
+-    int score=0, snum=0;
++    int ret = FAIL, temp_num;
++    int val=0, score = 0, snum, area = 320;
+ 
+     unsigned char *tmp_img = (unsigned char *)context_get_img_buf();
+-    unsigned char *template_data = g_enroll_ctx->tmp_template;
+     LOGD("start.\n");
+-    memset(template_data, 0, TEMPLATE_SIZE*TEMPLATE_NUM);
+     memcpy(tmp_img, g_auth_ctx->remove_bkg_img, IMAGE_SIZE);
+-    memcpy(template_data, g_enroll_ctx->test_template_data, TEMPLATE_SIZE*TEST_TEMPLATE_NUM);
+-    val = afs_match(tmp_img, g_enroll_ctx->test_template_data, TEST_TEMPLATE_NUM, g_config.auth_level, &score, &snum);
+-    LOGD("match result = %d end.\n", val);
+-    LOGD("end.\n");
+-    if(score > g_config.auth_score && snum > g_config.auth_characteristic_num) {
+-        return SUCCESS;
++    snum = alg120_extract((int *)tmp_img);
++    val = alg120_match((int *)g_enroll_ctx->test_template_data, TEMPLATE_NUM_A83, &score, &area, s_update_flag);
++    temp_num = alg120_getState((int *)g_enroll_ctx->test_template_data, TEMPLATE_NUM_A83);
++    if(score > g_config.auth_score && area > 256) {
++        ret = SUCCESS;
+     }
+-    return FAIL;
++    LOGD("match val=%d score=%d area=%d snum=%d temp_num=%d ret = %d", val, score, area, snum, temp_num, ret);
++    return ret;
+ }
+ 
+ static int sensor120_factory_test_remove(void)
+ {
+     LOGD("start.\n");
+-    g_enroll_ctx->max_score = 0;
+-    memset(g_enroll_ctx->max_image, 0, IMAGE_SIZE);
+-    memset(g_enroll_ctx->test_template_data, 0, TEMPLATE_SIZE*TEST_TEMPLATE_NUM);
++    g_enroll_ctx->max_count = 0;
++    memset(g_enroll_ctx->max_image, 0, sizeof(g_enroll_ctx->max_image));
++    memset(g_enroll_ctx->test_template_data, 0, sizeof(g_enroll_ctx->test_template_data));
+     LOGD("end.\n");
+     return SUCCESS;
+ }
+@@ -705,7 +769,8 @@ static int sensor120_factory_test_get_image(void *image)
+             }
+             memcpy(image_bkg, context_get_sensor120_bkg(), IMAGE_SIZE);
+             fp120_remove_bkg(image_in, image_bkg, image_out);
+-            afs_enhance(image_out, image_enhance);
++            //afs_enhance(image_out, image_enhance);
++            alg120_enhance((int *)image_out, (int *)image_enhance);
+             read_bmp_head(img, 1078, IMAGE_W, IMAGE_H);
+             memcpy(img + 1078, image_in, IMAGE_SIZE);
+             read_bmp_head(img + len, 1078, IMAGE_W, IMAGE_H);
+@@ -744,7 +809,7 @@ int init_sensor120(soft_sensor_t *sensor) {
+     sensor->image_buffer                        = protocol_image_buffer;
+ 
+     sensor->template_head                       = template;
+-    sensor->policy_data_size                    = sizeof(struct fp_template_head) + TEMPLATE_SIZE*TEMPLATE_NUM;
++    sensor->policy_data_size                    = sizeof(struct fp_template_head) + (TEMPLATE_SIZE_A83*TEMPLATE_NUM_A83) * sizeof(int);
+ 
+     sensor->sensor_create                       = sensor120_create;
+     sensor->sensor_destory                      = sensor120_destory;

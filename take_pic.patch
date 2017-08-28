@@ -1,0 +1,112 @@
+diff --git a/fingerprint/service/malib/Android.mk b/fingerprint/service/malib/Android.mk
+index 87c4eec..a04d5df 100644
+--- a/fingerprint/service/malib/Android.mk
++++ b/fingerprint/service/malib/Android.mk
+@@ -9,9 +9,9 @@ LOCAL_SRC_FILES := \
+ 	utils/bitmap_header.c \
+ 	utils/malib.c \
+ 	utils/mastring.c
+-	#utils/masnprintf.c \
+-	#utils/bitmap.c\
+-	#pgm/pgm.c
++	utils/masnprintf.c \
++	utils/bitmap.c\
++	pgm/pgm.c
+ 
+ LOCAL_MODULE := malib
+ 
+diff --git a/fingerprint/service/soft_sensor/sensor83/Android.mk b/fingerprint/service/soft_sensor/sensor83/Android.mk
+index 8013ccb..45575ef 100644
+--- a/fingerprint/service/soft_sensor/sensor83/Android.mk
++++ b/fingerprint/service/soft_sensor/sensor83/Android.mk
+@@ -8,10 +8,10 @@ LOCAL_SRC_FILES := \
+ 	algorithm/removebkg.c \
+ 	sensor_83.c \
+ 	sensor_context.c \
+-	sensor_wrapper.c 
+-	#algorithm/fft.c \
+-	#../../malib/pgm/pgm.c \
+-	#../../malib/utils/bitmap.c
++	sensor_wrapper.c \
++	algorithm/fft.c \
++	../../malib/pgm/pgm.c \
++	../../malib/utils/bitmap.c
+ 
+ LOCAL_MODULE := sensor83
+ 
+diff --git a/fingerprint/service/soft_sensor/sensor83/sensor_83.c b/fingerprint/service/soft_sensor/sensor83/sensor_83.c
+index 48f56bf..de6a92d 100644
+--- a/fingerprint/service/soft_sensor/sensor83/sensor_83.c
++++ b/fingerprint/service/soft_sensor/sensor83/sensor_83.c
+@@ -14,8 +14,8 @@
+ #include "sensor_common.h"
+ #include "malib.h"
+ #include "platform_interface.h"
+-//#include "pgm.h"
+-
++#include "pgm.h"
++#include "bitmap.h"
+ int s_sensor_mode;
+ int s_cover_type;
+ static const int s_interrupt_line = 0x40;
+@@ -201,6 +201,10 @@ int fp83_read_image(int *buf, int len, int line_step)
+     unsigned char *tmp_in;
+     int *tmp_out;
+ 
++    static char name[100];
++    static int num;
++    sprintf(name, "/data/data/ma.fprint/files/src%.4d.bmp", num);
++
+     size = 17408; //((1+129*129) + 1023) / 1024 * 1024;//for mtk
+     imgbuf = (unsigned char *)context_get_read_img_buf();
+     sensor_set_register(MA_CURRENT_LINE_REG, 1); //设置当前行
+@@ -219,6 +223,8 @@ int fp83_read_image(int *buf, int len, int line_step)
+         tmp_out[0] = ((unsigned int)tmp_in[0] << 4) + (tmp_in[1] & 0x0f);
+         tmp_out++;
+     }
++    save_bmp_file(name, buf, IMAGE_W, IMAGE_H);
++    num++;
+     return SUCCESS;
+ }
+ 
+diff --git a/fingerprint/service/soft_sensor/sensor83/sensor_wrapper.c b/fingerprint/service/soft_sensor/sensor83/sensor_wrapper.c
+index 323d759..3b55d1a 100644
+--- a/fingerprint/service/soft_sensor/sensor83/sensor_wrapper.c
++++ b/fingerprint/service/soft_sensor/sensor83/sensor_wrapper.c
+@@ -17,7 +17,8 @@
+ #include "sensor_83.h"
+ #include "sensor83_config.h"
+ 
+-//#include "pgm.h"
++#include "pgm.h"
++#include "bitmap.h"
+ 
+ static int sensor83_get_proper_image(void *img, const int len, const int line_step);
+ 
+@@ -487,12 +488,26 @@ static int algorithm83_navigate_init(void) {
+ 
+ static int algorithm83_navigate_tap(uint32_t *navi_result){
+     int ret, pressFlag = 0;
++
++    char name[50];
++    static int num;
++
+     fp83_read_image(g_navi_ctx->navigate_image, IMAGE_SIZE, 1);
+     ret = algorithm83_get_energy(g_navi_ctx->navigate_image);
+     if(ret >  IMAGE_SIZE*3/4) {
+         pressFlag =1;
+     }
+ 
++    sprintf(name, "/data/data/ma.fprint/files/navigate_%.4d.bmp", num);
++    save_bmp_file(name, g_navi_ctx->bkg, IMAGE_W, IMAGE_H);
++    num++;
++
++    LOGD("==================RET = %d \n",ret);
++    if(ret == 0){
++        LOGD("===============进设置===========");
++    //    sensor83_calc_init_parameters();
++    }
++
+     if (*navi_result == NAVI_NONE) {
+         if (pressFlag) {
+             *navi_result = NAVI_TAP_DOWN;

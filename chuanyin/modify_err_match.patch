@@ -1,0 +1,117 @@
+diff --git a/fingerprint/client/libfprint/process/authenticate.c b/fingerprint/client/libfprint/process/authenticate.c
+index 63539d6..c4a3f2e 100644
+--- a/fingerprint/client/libfprint/process/authenticate.c
++++ b/fingerprint/client/libfprint/process/authenticate.c
+@@ -66,7 +66,7 @@ static int verify(struct cmd_entry *qe)
+ 			break;
+ 		}
+ 	} while(gAuthCount-- > 0 && !fid);
+-	//LOGD("fid=%u, count=%d", fid, fid_count);
++	LOGD("fid=%u, count=%d", fid, fid_count);
+ 	fid>0? LOGD("match successfully."): LOGD("match failed.");
+ 	if (!fid && fid_count) {
+ 		dc_send_cmd(TIMEOUT_WAKELOCK);
+@@ -76,6 +76,7 @@ static int verify(struct cmd_entry *qe)
+ 	while (1) {
+ 		//not check cancel flag, when checking leave
+ 	    down = ma_tac_detectTouch_getEnergy();
++        LOGD("----------------------------down = %d", down);
+ 	    if(down < 0) {
+ 	        error_notify(FINGERPRINT_ERROR_HW_UNAVAILABLE);
+ 	        break;
+@@ -114,6 +115,7 @@ void* authenticate_work(void *q)
+ 	int calibrated, down=0, calibrate_count = 10;
+ 	uint32_t fids[FINGERPRINT_SIZE];
+ 	int fid_count = 0;
++    int downcc=0;
+ 	memset(fids, 0, sizeof(fids));
+ 	LOGD("authenticate start\n");
+ 	gAuthCount = g_config.auth_retry_times;
+@@ -124,7 +126,10 @@ void* authenticate_work(void *q)
+ 	while (1) {
+ 	    gAuthCount = g_config.auth_retry_times;
+ 		r = ma_tac_detect_touch();
+-        LOGD(" tac detect touch , r = %d\n",r);
++        downcc = ma_tac_detectTouch_getEnergy();
++        LOGD(" ------------tac detect touch , r = %d downcc = %d\n",r,downcc);
++        r = r & downcc;
++        LOGD(" ------------tac detect touch 2 , r = %d \n",r);
+ 		if (r == NORMAL_UNPRESSED) {
+ 			ma_tac_sleep();
+ 			//TODO  change the logic/
+diff --git a/fingerprint/service/protocol/protocol.c b/fingerprint/service/protocol/protocol.c
+index 1c4b846..c702f66 100644
+--- a/fingerprint/service/protocol/protocol.c
++++ b/fingerprint/service/protocol/protocol.c
+@@ -180,6 +180,7 @@ static void protocol_detect_touch_get_energy(protocol_detect_touch_get_energy_t
+ #ifdef DEBUG
+         memcpy(data->response.image, g_image_buffer, IMAGE_SIZE);
+ #endif
++        LOGD("------------minscore = 0x%x score = 0x%x pressret = %d ", minscore,score,pressret);
+         if(minscore == 0x7fffffff) {
+             if(score < minscore) minscore = score;
+             if(pressret == NORMAL_PRESSED) {
+diff --git a/fingerprint/service/soft_sensor/sensor83/sensor_83.c b/fingerprint/service/soft_sensor/sensor83/sensor_83.c
+index 4976769..7e4e1d6 100644
+--- a/fingerprint/service/soft_sensor/sensor83/sensor_83.c
++++ b/fingerprint/service/soft_sensor/sensor83/sensor_83.c
+@@ -156,6 +156,7 @@ int fp83_capture_mode(void)
+             if(g_config.cover_type == COVER_S3) {
+                 ret = sensor_sid_set_mode(CAPTURE_MODE, RESET_MODE);
+             } else {
++            LOGD("----------------------sensor set mode------fp capture mode---------");
+                 ret = sensor_set_mode(CAPTURE_MODE);
+             }
+             if ( ret != SUCCESS ) {
+@@ -227,6 +228,7 @@ static int fp83_detect_mode_parameters(
+     LOGD("start.");
+ 
+     if ( s_sensor_mode != CAPTURE_MODE ) {
++    LOGD("start -----------detect mode parameters --.");
+         ret = fp83_capture_mode();
+     }
+     if ( ret != SUCCESS ) {
+@@ -859,6 +861,7 @@ int fp83_calc_init_parameters(void)
+         if(ret == SUCCESS) {
+             ret = calc_drefdrv(greyavg);
+             if(ret == SUCCESS) {
++                LOGD("--------calc init parameters -----");
+                 fp83_capture_mode();
+                 sensor_set_register(MA_83_REF_DRV_REG, (refdrv & 0xdf));//关驱动，算中断参数
+                 fp83_read_image(buf, IMAGE_SIZE, 1);
+@@ -880,6 +883,7 @@ static int fp83_calc_detect_mode_parameters(
+ 
+     context_get_sensor83_refdrv(&refdrv);
+     if ( s_sensor_mode != CAPTURE_MODE ) {
++    LOGD("start--------------------fp83_calc_detect_mode_parameters---.");
+         ret = fp83_capture_mode();
+     }
+     if ( ret != SUCCESS ) {
+@@ -927,6 +931,7 @@ int fp83_calc_interrupt_parameters(void)
+     fp83_calc_detect_mode_parameters(s_interrupt_line, s_interrupt_line, s_interrupt_line,
+             0x01, 0x01, 0, a, 0xe0);
+     platform_msleep(s_interrupt_delay_ms);
++            LOGD("----------------------sensor set mode------fp calc interrupt parameters---------");
+     sensor_set_mode(CAPTURE_MODE);
+     sensor_get_register(MA_83_PIXEL_CNT_LOW_REG, &low_value);
+     sensor_get_register(MA_83_PIXEL_CNT_HIGH_REG, &high_value);
+@@ -967,6 +972,7 @@ int fp83_read_line(void)
+     unsigned char *tmp_in;
+     int *tmp_out;
+     unsigned char line[131];
++            LOGD("----------------------sensor set mode------fp read line---------");
+     sensor_set_mode(CAPTURE_MODE);
+     sensor_read_line(line, 131);//多配置一次0xff，带出0xff数据
+     tmp_in = line + 8;
+diff --git a/version/test.csv b/version/test.csv
+index a14beae..8d51bd2 100644
+--- a/version/test.csv
++++ b/version/test.csv
+@@ -12,6 +12,7 @@ Default,Android,4.0.00,A121_N,Watchtrust,x86_64,Android6.0,Yes,Yes,Yes,No,14,3
+ Default,Android,4.0.00,A121_N,Nutlet,arm64-v8a,Android6.0,Yes,Yes,Yes,No,14,3
+ Default,Android,4.0.00,A121_N,Microtrust,arm64-v8a,Android6.0,Yes,Yes,Yes,No,14,3
+ Default,Android,4.0.00,A83_N,Android,armeabi,Android6.0,Yes,Yes,Yes,No,21,3
++Default,Android,4.0.00,A83_T,Android,armeabi arm64-v8a,Android6.0,No,Yes,Yes,No,21,3
+ Default,Android,4.0.00,A80_T,Android,armeabi,Android6.0,Yes,Yes,Yes,No,14,3
+ Default,Android,4.0.00,A80_T&A83_N,Android,armeabi,Android6.0,Yes,Yes,Yes,No,21,3
+ Default,Android,4.0.00,A121_N,Android,arm64-v8a,Ali5.1,Yes,Yes,Yes,No,14,3

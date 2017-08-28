@@ -1,0 +1,52 @@
+diff --git a/fingerprint/client/libfprint/process/authenticate.c b/fingerprint/client/libfprint/process/authenticate.c
+index 9e6b72c..4f28905 100644
+--- a/fingerprint/client/libfprint/process/authenticate.c
++++ b/fingerprint/client/libfprint/process/authenticate.c
+@@ -44,7 +44,7 @@ static int verify(struct cmd_entry *qe)
+     dc_send_cmd(MA_POWER_ON);//添加灭屏后触摸指纹亮屏
+ #endif
+ 	do {
+-#ifdef OEM_CHUANYIN
++//#ifdef OEM_CHUANYIN
+         if(upflag == 1 && downflag == 0) {
+             ALOGE("%s, TAP_DOWN\n", __func__);
+             dc_send_cmd(TAP_DOWN);
+@@ -61,7 +61,7 @@ static int verify(struct cmd_entry *qe)
+             dc_send_cmd(MA_KEY_F14);//add for chuanyin
+             upflag = 0;
+         }
+-#endif
++//#endif
+ 
+ #if (defined(PLATFORM_YUNOS) || defined(OEM_YUNOS))
+ 		if(	gAuthCount == g_config.auth_retry_times) {
+@@ -130,7 +130,7 @@ static int verify(struct cmd_entry *qe)
+ 	        break;
+ 	    }
+ 	}
+-#ifdef OEM_CHUANYIN
++//#ifdef OEM_CHUANYIN
+     if(downflag==1) {
+         ALOGE("%s, TAP_UP\n", __func__);
+         dc_send_cmd(TAP_UP);
+@@ -143,7 +143,7 @@ static int verify(struct cmd_entry *qe)
+         downflag = 0;
+         upflag = 1;
+     }
+-#endif
++//#endif
+ 
+ //#if (defined(PLATFORM_YUNOS) || defined(OEM_YUNOS))
+ //	acquired_event_notify(FINGERPRINT_ACQUIRED_FINGER_UP);
+diff --git a/version/test.csv b/version/test.csv
+index 8f2d33b..6f7734c 100644
+--- a/version/test.csv
++++ b/version/test.csv
+@@ -1,6 +1,6 @@
+ Product,OEM,Version,Support Sensor,Platform,APP ABI,Operation System,Enable Navigation,Return After Authenticate,Filter Duplicate Enroll,Filter Part Touch Enroll,Enroll Times,Auth Retry Times
+ Default,Android,4.0.00,A121_N,Android,arm64-v8a,Android6.0,Yes,Yes,Yes,No,14,3
+-Default,Android,4.0.00,A96_N,Android,arm64-v8a,Android6.0,Yes,Yes,Yes,No,14,3
++Default,Android,4.0.00,A96_N,Android,arm64-v8a armeabi,Android6.0,Yes,Yes,Yes,No,14,3
+ Default,Android,4.0.00,A121_N,Android,armeabi,Android6.0,Yes,Yes,Yes,No,14,3
+ Default,Android,4.0.00,A96_N,Android,armeabi,Android6.0,Yes,Yes,Yes,No,14,3
+ Default,Android,4.0.00,A82_N,Android,armeabi,Android6.0,Yes,Yes,Yes,No,14,3

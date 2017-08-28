@@ -1,0 +1,235 @@
+diff --git a/fingerprint/client/fingerprintso/ma_release_Jnifp.c b/fingerprint/client/fingerprintso/ma_release_Jnifp.c
+index c5e72f4..df3af1c 100644
+--- a/fingerprint/client/fingerprintso/ma_release_Jnifp.c
++++ b/fingerprint/client/fingerprintso/ma_release_Jnifp.c
+@@ -28,6 +28,7 @@ jfieldID ecodeFid;
+ 
+ static int notify(fingerprint_t *fp);
+ extern unsigned char *gp_driver_mmap;
++static int alreadyAuth = 0;
+ 
+ //初始化的时候会调进来一次，在这个方法里持有jvm的引用
+ JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM *vm, void *reserved){
+@@ -158,6 +159,7 @@ JNIEXPORT jint JNICALL Java_ma_release_Jnifp_open
+     (*env)->ReleaseStringUTFChars(env, path, fpath);
+     set_notify(notify); //通知函数
+     //ret = ma_tac_calibrate(); //添加校准,解决重启失效问题
++    ma_tac_reset_mode();
+ 	LOGD("end \n");
+ 	return ret;
+ }
+@@ -216,6 +218,7 @@ JNIEXPORT jint JNICALL Java_ma_release_Jnifp_postEnroll
+ 	LOGD("start \n");
+ 	int ret = 0;
+     ret = bio_post_enroll();
++    usleep(300);
+     ret = bio_cancel();
+ 	LOGD("end \n");
+ 	return ret;
+@@ -230,6 +233,9 @@ JNIEXPORT jint JNICALL Java_ma_release_Jnifp_authenticate
+   (JNIEnv *env, jclass cls){
+ 	LOGD("start \n");
+ 	int ret = 0;
++    if(!alreadyAuth){
++        ma_tac_reset_mode();
++    }
+     ret = bio_authenticate(0,0);
+ 	LOGD("end \n");
+ 	return ret;
+@@ -298,6 +304,21 @@ JNIEXPORT jint JNICALL Java_ma_release_Jnifp_calibrate(JNIEnv *env, jclass cls){
+ 
+ /*
+  * Class:     ma_release_jnifp
++ * Method:    resetVolt
++ * Signature: ()I
++ */
++JNIEXPORT jint JNICALL Java_ma_release_Jnifp_resetVolt(JNIEnv *env, jclass cls){
++      LOGD("start");
++      int ret = 0;
++      usleep(5000);
++      ret = ma_tac_reset_mode();
++      ret = bio_cancel();
++      return ret;
++      LOGD("end");
++}
++
++/*
++ * Class:     ma_release_jnifp
+  * Method:    calibrate
+  * Signature: ()I
+  */
+diff --git a/fingerprint/client/fingerprintso/ma_release_Jnifp.h b/fingerprint/client/fingerprintso/ma_release_Jnifp.h
+index 76fecb3..f3ad3a0 100644
+--- a/fingerprint/client/fingerprintso/ma_release_Jnifp.h
++++ b/fingerprint/client/fingerprintso/ma_release_Jnifp.h
+@@ -115,7 +115,7 @@ JNIEXPORT jint JNICALL Java_ma_release_Jnifp_getImage
+ 
+ JNIEXPORT jstring JNICALL Java_ma_release_Jnifp_getVendor
+  (JNIEnv *, jclass);
+-
++JNIEXPORT jint JNICALL Java_ma_release_Jnifp_resetVolt(JNIEnv *, jclass);
+ #ifdef __cplusplus
+ }
+ #endif
+diff --git a/fingerprint/client/libfprint/interface/ca_interface.c b/fingerprint/client/libfprint/interface/ca_interface.c
+index 76d716e..b8da1cf 100644
+--- a/fingerprint/client/libfprint/interface/ca_interface.c
++++ b/fingerprint/client/libfprint/interface/ca_interface.c
+@@ -109,7 +109,7 @@ int bio_cancel(void)
+ 	// auth state may need wakeup
+ 	if(s_is_canceld) {
+ 	    LOGD("duplicate cancel.\n");
+-	    return 0;
++	    //return 0;
+ 	}
+ 	s_is_canceld = 1;
+     cancel_cmd();
+@@ -268,7 +268,7 @@ int bio_init(void)
+         bio_set_active_group(DEFAULT_USER_GROUP, DEFAULT_STORAGE_PATH);
+     }
+ 
+-    ma_tac_get_energy();//get bkg for factory test get image.
++    //ma_tac_get_energy();//get bkg for factory test get image.
+     refresh_interrupt_parameters_timer();
+ #if defined(PRODUCT_E2_OVERSEA) && defined(OEM_KONKA)
+     start_screen_status_process();
+diff --git a/fingerprint/client/libfprint/tac/microarray_tac.c b/fingerprint/client/libfprint/tac/microarray_tac.c
+index 5bf3abe..985898c 100644
+--- a/fingerprint/client/libfprint/tac/microarray_tac.c
++++ b/fingerprint/client/libfprint/tac/microarray_tac.c
+@@ -338,6 +338,23 @@ int ma_tac_calibrate(void)
+ 	}
+ 	return 0;
+ }
++
++/*reset 芯片到正常采图模式
++ *@return 0成功
++ */
++int ma_tac_reset_mode(void){
++    protocol_reset_mode_t msg;
++    LOGD("-----------register reset mode start --");
++    memset(&msg, 0,sizeof(protocol_reset_mode_t));
++    ma_tac_security_invoke(PROTOCOL_RESET_MODE, &msg, sizeof(protocol_reset_mode_t));
++    if(msg.response.err){
++        LOGD("write fail---");
++        return -1;
++    }
++    LOGD("-----------register reset mode end --");
++    return 0;
++}
++
+ /*计算中断检测参数
+  * @return 0成功
+  */
+diff --git a/fingerprint/include/protocol.h b/fingerprint/include/protocol.h
+index d03731a..fc96b7d 100644
+--- a/fingerprint/include/protocol.h
++++ b/fingerprint/include/protocol.h
+@@ -37,6 +37,7 @@ enum {
+ 	PROTOCOL_REMOVE,
+ 	PROTOCOL_HAS_CALIBRATE,
+ 	PROTOCOL_CALIBRATE,
++    PROTOCOL_RESET_MODE,
+ 	PROTOCOL_CALC_INTERRUPT_PARA,
+ 	PROTOCOL_DETECT_MODE,
+ 	PROTOCOL_SAVE_PARAS,
+@@ -254,6 +255,16 @@ typedef union {
+ 		int ret;
+ 		int err;
+ 	} response;
++} protocol_reset_mode_t;
++
++typedef union {
++	struct {
++		int unused;
++	} request;
++	struct {
++		int ret;
++		int err;
++	} response;
+ } protocol_calc_interrupt_para_t;
+ 
+ typedef union {
+diff --git a/fingerprint/service/protocol/protocol.c b/fingerprint/service/protocol/protocol.c
+index 6c65800..1ab672d 100644
+--- a/fingerprint/service/protocol/protocol.c
++++ b/fingerprint/service/protocol/protocol.c
+@@ -320,6 +320,18 @@ static void protocol_calibrate(protocol_calibrate_t *data)
+     }
+ }
+ 
++static void protocol_reset_mode(protocol_reset_mode_t *data){
++    int ret=0;
++    LOGD("-----------start----");
++    ret = sensor_reset_mode();
++    if(ret <0){
++        data->response.err = ret;
++    }else{
++        data->response.err = 0;
++    }
++    LOGD("-----------end-----");
++}
++
+ static void protocol_calc_interrupt_para(protocol_calc_interrupt_para_t *data)
+ {
+     int ret = 0;
+@@ -563,6 +575,7 @@ static inline const char* enum2str(int cmdnum)
+         ENUM_TO_STR(PROTOCOL_UPDATE_AUTHENTICATE_DATA);
+         ENUM_TO_STR(PROTOCOL_REMOVE);
+         ENUM_TO_STR(PROTOCOL_CALIBRATE);
++        ENUM_TO_STR(PROTOCOL_RESET_MODE);
+         ENUM_TO_STR(PROTOCOL_CALC_INTERRUPT_PARA);
+         ENUM_TO_STR(PROTOCOL_DETECT_MODE);
+         ENUM_TO_STR(PROTOCOL_SAVE_PARAS);
+@@ -628,6 +641,8 @@ void protocol_handle_plain_cmd(int cmd, void* data) {
+             EASY_PROTOCOL(protocol_has_calibrate);
+         case PROTOCOL_CALIBRATE:
+             EASY_PROTOCOL(protocol_calibrate);
++        case PROTOCOL_RESET_MODE:
++            EASY_PROTOCOL(protocol_reset_mode);
+         case PROTOCOL_CALC_INTERRUPT_PARA:
+             EASY_PROTOCOL(protocol_calc_interrupt_para);
+         case PROTOCOL_DETECT_MODE:
+diff --git a/fingerprint/service/soft_sensor/sensor83/sensor_83.c b/fingerprint/service/soft_sensor/sensor83/sensor_83.c
+index 43479a4..72a85b9 100644
+--- a/fingerprint/service/soft_sensor/sensor83/sensor_83.c
++++ b/fingerprint/service/soft_sensor/sensor83/sensor_83.c
+@@ -963,11 +963,12 @@ int fp83_calc_interrupt_parameters(void)
+     sensor_get_register(MA_83_PIXEL_CNT_HIGH_REG, &high_value);
+     value = (((unsigned int)(high_value << 8)) | low_value);
+ 
+-    LOGD("0x58=0x%x, 0x5c=0x%x, value=0x%x", low_value, high_value, value);
++    LOGD("0x58=0x%x, 0x5c=0x%x, value=0x%x, n = 0x%x", low_value, high_value, value,n);
+ 
+-    if ( value + g_config.interrupt_th < n || n == 0) {
++    if (low_value != 0 && (value + g_config.interrupt_th < n || n == 0)) {
+         n = value + g_config.interrupt_th;
+     }
++    LOGD("-----calc interrupt param n = 0x%x,g_config.interrupt_th = 0x%x",n,g_config.interrupt_th);
+     s_sensor_mode = DETECT_MODE;
+     context_set_sensor83_interrupt_param(n, a);
+     fp83_detect_mode();
+diff --git a/fingerprint/service/soft_sensor/sensor83/sensor_context.c b/fingerprint/service/soft_sensor/sensor83/sensor_context.c
+index f5b37e4..280f61c 100644
+--- a/fingerprint/service/soft_sensor/sensor83/sensor_context.c
++++ b/fingerprint/service/soft_sensor/sensor83/sensor_context.c
+@@ -63,6 +63,7 @@ int init_sensor83_context(void)
+ 
+ int save_sensor83_context(void)
+ {
++    LOGD("----------------------------------save_sensor83_context----------------");
+     return policy_set_sensor_para(SNESOR_CONTEXT_PROPERTY_NAME, &s_sensor_ctx.property, sizeof(sensor_property_t));
+ }
+ 
+diff --git a/fingerprint/service/soft_sensor/sensor83/sensor_wrapper.c b/fingerprint/service/soft_sensor/sensor83/sensor_wrapper.c
+index bdb3f26..9e11009 100644
+--- a/fingerprint/service/soft_sensor/sensor83/sensor_wrapper.c
++++ b/fingerprint/service/soft_sensor/sensor83/sensor_wrapper.c
+@@ -286,6 +286,7 @@ static int algorithm83_press_detect_texture(void *image, int type) {
+ 	ret = check_grey(image_in);
+ 	if(ret == SUCCESS) {
+ 	    count = fp83_press_detect(image_in, context_get_sensor83_bkg(), g_sensor83_grey_offset);
++        LOGD("---------------------------detect count = %d", count);
+ 	    sratio = count * 100 / SIZE;
+ 	    switch (type) {
+ 	    case AUTHENTICATE_DETECT:

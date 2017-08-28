@@ -1,0 +1,26 @@
+diff --git a/fingerprint/client/fingerprintso/fingerprint.c b/fingerprint/client/fingerprintso/fingerprint.c
+index 92fb035..24138c5 100644
+--- a/fingerprint/client/fingerprintso/fingerprint.c
++++ b/fingerprint/client/fingerprintso/fingerprint.c
+@@ -26,6 +26,8 @@ static int fingerprint_close(hw_device_t *dev)
+ 	if (dev) {
+ 		free(dev);
+ 		bio_close();
++	    LOGD("--------------------------------getpid = %d\n",getpid());
++        kill(getpid(),SIGKILL);
+ 		return 0;
+ 	} else {
+ 		return -1;
+diff --git a/version/test.csv b/version/test.csv
+index 79707ac..b8f2f73 100644
+--- a/version/test.csv
++++ b/version/test.csv
+@@ -1,7 +1,7 @@
+ Product,OEM,Version,Support Sensor,Platform,APP ABI,Operation System,Enable Navigation,Return After Authenticate,Filter Duplicate Enroll,Filter Part Touch Enroll,Enroll Times,Auth Retry Times
+ Default,Android,4.0.00,A121_N,Android,arm64-v8a,Android6.0,Yes,Yes,Yes,No,14,3
+ Default,Android,4.0.00,A96_N,Android,arm64-v8a,Android6.0,Yes,Yes,Yes,No,14,3
+-Default,Android,4.0.00,A121_N,Android,armeabi,Android6.0,Yes,Yes,Yes,No,14,3
++Default,Android,4.0.00,A121_N,Android,armeabi arm64-v8a,Android6.0,Yes,Yes,Yes,No,14,1
+ Default,Android,4.0.00,A96_N,Android,armeabi,Android6.0,Yes,Yes,Yes,No,14,3
+ Default,Android,4.0.00,A82_N,Android,armeabi,Android6.0,Yes,Yes,Yes,No,14,3
+ Default,Android,4.0.00,A121_N,Trustkernel,armeabi arm64-v8a,Android6.0,Yes,Yes,Yes,No,14,3

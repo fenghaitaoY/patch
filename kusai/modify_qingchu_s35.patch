@@ -1,0 +1,56 @@
+diff --git a/fingerprint/service/soft_sensor/sensor83/sensor_wrapper.c b/fingerprint/service/soft_sensor/sensor83/sensor_wrapper.c
+index d299d4f..a526cb5 100644
+--- a/fingerprint/service/soft_sensor/sensor83/sensor_wrapper.c
++++ b/fingerprint/service/soft_sensor/sensor83/sensor_wrapper.c
+@@ -457,18 +457,30 @@ static int algorithm83_press_detect_texture(void *image, int type) {
+ //	    memset(g_enroll_ctx->max_image, 0, sizeof(g_enroll_ctx->max_image));
+ //	}
+ 
+-	if(type==AUTHENTICATE_DETECT) {
+-		ret = select_image(sratio, image_in);
+-	} else {
+-		if(ret==NORMAL_PRESSED) {
+-			fp83_remove_bkg(image_in, context_get_sensor83_bkg(),
+-				g_auth_ctx->remove_bkg_img, g_enroll_ctx->proc_buf, g_sensor83_grey_offset);
+-			if ((count - g_enroll_ctx->max_count) > (SIZE - g_enroll_ctx->max_count) / 10) {
+-				memcpy(g_enroll_ctx->max_image, image_in, sizeof(g_enroll_ctx->max_image));
+-				g_enroll_ctx->max_count = count;
+-			}
+-		}
+-	}
++   if (ret == NORMAL_PRESSED) {
++        fp83_remove_bkg(image_in, context_get_sensor83_bkg(),
++            g_auth_ctx->remove_bkg_img, g_enroll_ctx->proc_buf, g_sensor83_grey_offset);
++        if ((count - g_enroll_ctx->max_count) > (SIZE - g_enroll_ctx->max_count) / 10) {
++            memcpy(g_enroll_ctx->max_image, image_in, sizeof(g_enroll_ctx->max_image));
++            g_enroll_ctx->max_count = count;
++        }    
++    } else {
++        s_cnt_base = 0; 
++        s_cnt_img = 0; 
++    } 
++
++// 	if(type==AUTHENTICATE_DETECT) {
++// 		ret = select_image(sratio, image_in);
++// 	} else {
++// 		if(ret==NORMAL_PRESSED) {
++// 			fp83_remove_bkg(image_in, context_get_sensor83_bkg(),
++// 				g_auth_ctx->remove_bkg_img, g_enroll_ctx->proc_buf, g_sensor83_grey_offset);
++// 			if ((count - g_enroll_ctx->max_count) > (SIZE - g_enroll_ctx->max_count) / 10) {
++// 				memcpy(g_enroll_ctx->max_image, image_in, sizeof(g_enroll_ctx->max_image));
++// 				g_enroll_ctx->max_count = count;
++// 			}
++// 		}
++// 	}
+ 
+ 	LOGD("count=%d ratio=%d, ret=%d grey offset=0x%x\n", count, sratio, ret, g_sensor83_grey_offset);
+ 
+@@ -691,7 +703,7 @@ match_again:
+ 	} else {
+ 		if (isMult == 1) {
+ 			isMult = 0;
+-			goto match_again;
++// 			goto match_again;
+ 		} else if(count_down==0) { //最后一次尝试失败打印
+             match_save_bmp(ret, char_num);
+ 			LOGD("score=%d, char_num=%d, matchArea=%d score_th=%d, ratio=%d\n",

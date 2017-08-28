@@ -1,0 +1,161 @@
+diff --git a/fingerprint/client/libfprint/include/globalvar.h b/fingerprint/client/libfprint/include/globalvar.h
+index c3e6f4a..a25c2e2 100644
+--- a/fingerprint/client/libfprint/include/globalvar.h
++++ b/fingerprint/client/libfprint/include/globalvar.h
+@@ -26,6 +26,8 @@ enum fp_acquired_info {
+ 
+ extern int gNotCalibrated;
+ extern hw_auth_token_t *gHat;
++extern int gWorkState;
++extern int gCurrentState;
+ 
+ extern microarray_properties_t g_config;
+ extern int s_chip_id;
+diff --git a/fingerprint/client/libfprint/interface/ca_interface.c b/fingerprint/client/libfprint/interface/ca_interface.c
+index 43a5a8f..ce87e0e 100644
+--- a/fingerprint/client/libfprint/interface/ca_interface.c
++++ b/fingerprint/client/libfprint/interface/ca_interface.c
+@@ -27,7 +27,7 @@ microarray_properties_t g_config;
+ static int s_is_canceld = 0; //for duplicate cancel detect
+ static int is_init = 0;
+ int s_chip_id = 0;
+-
++int gCurrentState = 0;
+ ////////////////////////////////////////////////////////////////
+ 
+ int bio_command(uint32_t cmd, uint32_t arg)
+@@ -71,6 +71,7 @@ int bio_authenticate(uint64_t operation_id, uint32_t gid)
+         enqueue_cmd(authenticate_detect_work, (void*)&cmd_auth, PROCESS_AUTHENTICATE);
+     }
+ 
++    gCurrentState = PROCESS_AUTHENTICATE;
+     LOGD("end.\n");
+ 
+     return 0;
+@@ -115,12 +116,16 @@ int bio_cancel(void)
+ 	    LOGD("duplicate cancel.\n");
+ 	    return 0;
+ 	}
++    LOGD("------gWorkState = %d, state = %d\n",gWorkState, gCurrentState);
++    if(gWorkState == PROCESS_IDLE_NAVIGATE && gCurrentState == PROCESS_AUTHENTICATE){
++        return 0;
++    }
+ 	s_is_canceld = 1;
+     cancel_cmd();
+     
+     ma_tac_cancel();
+ 
+-
++    gCurrentState = PROCESS_IDLE_NAVIGATE;
+ 
+ 	if (g_config.system_version == 7)
+     {
+@@ -171,6 +176,7 @@ int bio_enroll(uint32_t gid, uint32_t timeout_sec,const hw_auth_token_t *token)
+     // warning const set to unconst
+     cmd_enrollcalibrate.token = token;
+     enqueue_cmd(enrollcalibrate_work, (void*)&cmd_enrollcalibrate, PROCESS_ENROLLCALIBRATE);
++    gCurrentState = PROCESS_ENROLLCALIBRATE;
+     LOGD("end.\n");
+ 
+     return 0;
+diff --git a/fingerprint/client/libfprint/process/authenticate.c b/fingerprint/client/libfprint/process/authenticate.c
+index 00820da..b4c2d38 100644
+--- a/fingerprint/client/libfprint/process/authenticate.c
++++ b/fingerprint/client/libfprint/process/authenticate.c
+@@ -227,6 +227,8 @@ void* authenticate_work(void *q)
+ 		}
+ 
+ 		if (r && g_config.return_after_authenticate) {
++            gCurrentState = PROCESS_IDLE_NAVIGATE;
++            LOGD("----------------------匹配成功------------------");
+ 			break;
+ 		}
+ 
+diff --git a/fingerprint/client/libfprint/process/enrollcalibrate.c b/fingerprint/client/libfprint/process/enrollcalibrate.c
+index 5a3957b..4ed1d79 100644
+--- a/fingerprint/client/libfprint/process/enrollcalibrate.c
++++ b/fingerprint/client/libfprint/process/enrollcalibrate.c
+@@ -95,6 +95,7 @@ void* enrollcalibrate_work(void * q)
+                         if (percentage <= 0) {
+                             //TODO if enroll finish isn't ok
+                             ma_tac_enroll_finish();//存模板
++                            gCurrentState = PROCESS_IDLE_NAVIGATE;
+ 							finish = 1;
+                         } else {
+                         	percentage -= 1;
+@@ -104,7 +105,7 @@ void* enrollcalibrate_work(void * q)
+                         acquired_event_notify(FINGERPRINT_ACQUIRED_IMAGER_DIRTY);
+                     }else if (ret == ERROR_EXTRACT_FAIL) {
+                         LOGD("image extract fail.");
+-                        acquired_event_notify(FINGERPRINT_ACQUIRED_INSUFFICIENT);
++                        //acquired_event_notify(FINGERPRINT_ACQUIRED_INSUFFICIENT);
+                     } else if (ret == ERROR_ENROLL_DUPLICATE_AREA) {
+                     	duplicate_area_num++;
+                     	if(duplicate_area_num<10) {
+@@ -115,6 +116,7 @@ void* enrollcalibrate_work(void * q)
+ 							if (percentage <= 0) {
+ 								//TODO if enroll finish isn't ok
+ 								ma_tac_enroll_finish();//存模板
++                                gCurrentState = PROCESS_IDLE_NAVIGATE;
+ 								finish = 1;
+ 							} else {
+ 								percentage -= 1;
+diff --git a/fingerprint/client/libfprint/process/navigate.c b/fingerprint/client/libfprint/process/navigate.c
+index 7016f07..fdabd82 100644
+--- a/fingerprint/client/libfprint/process/navigate.c
++++ b/fingerprint/client/libfprint/process/navigate.c
+@@ -98,6 +98,10 @@ void * navigate_work(void *q)
+         ma_tac_detect_touch();
+ #endif
+         ma_tac_sleep();
++        if(gCurrentState == PROCESS_AUTHENTICATE || gCurrentState == PROCESS_ENROLLCALIBRATE){
++            LOGD("---current state autheticate/enroll--");
++            return NULL;
++        }
+ 
+         LOGD("go to kernel\n");
+         dc_send_cmd(SLEEP);
+diff --git a/fingerprint/client/libfprint/process/process.c b/fingerprint/client/libfprint/process/process.c
+index d108671..c388e13 100644
+--- a/fingerprint/client/libfprint/process/process.c
++++ b/fingerprint/client/libfprint/process/process.c
+@@ -25,7 +25,7 @@ struct cmd_entry g_cmd_tmp; //cmd entry stack
+ struct cmd_entry g_idle_cmd;
+ 
+ int g_factory_test = 0;
+-
++int gWorkState = 0;
+ /*将cmd编号转换成字符串输出
+  * @num cmd编号
+  */
+@@ -123,6 +123,9 @@ static void *fingerprint_hal_main_thread(void *p)
+         }
+         LOGD("Command %s is running\n", _num2string(qe->state));
+ 
++        gWorkState = qe->state;
++        LOGD("-------------gWorkState = %d ",gWorkState);
++
+         qe->cmd_process(qe);
+ 
+         if(sThreadExit){
+diff --git a/fingerprint/service/soft_sensor/sensor120/sensor_wrapper.c b/fingerprint/service/soft_sensor/sensor120/sensor_wrapper.c
+index e8f6bd9..58e5e81 100644
+--- a/fingerprint/service/soft_sensor/sensor120/sensor_wrapper.c
++++ b/fingerprint/service/soft_sensor/sensor120/sensor_wrapper.c
+@@ -252,6 +252,7 @@ static int sensor120_create(microarray_properties_t *config) {
+ 	LOGD("### calibrated = %d", calibrated);
+ 	if (SENSOR_CALIBRATED != calibrated) {
+ 		ret = fp120_calc_init_parameters();
++        context_set_sensor120_param_calibrated(1);
+ 	}
+ 
+ 	context_get_sensor120_interrupt_calibrated(&g_config.ma_ctx.interrupt_calibrated);
+@@ -475,7 +476,7 @@ match_again:
+     } else {
+         if(isMult == 1 && g_isenroll == 0){
+             isMult = 0;
+-            goto match_again;
++            //goto match_again;
+         }else if(count_down == 0){
+             match_save_bmp(ret, char_num);
+             LOGD("score=%d, char_num=%d, matchArea=%d,score_th=%d\n",score,char_num,area,g_config.auth_score);

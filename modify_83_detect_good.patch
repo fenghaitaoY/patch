@@ -1,0 +1,127 @@
+diff --git a/fingerprint/service/protocol/protocol.c b/fingerprint/service/protocol/protocol.c
+index 0181343..c4f0736 100644
+--- a/fingerprint/service/protocol/protocol.c
++++ b/fingerprint/service/protocol/protocol.c
+@@ -143,6 +143,7 @@ static void protocol_detect_touch(protocol_detect_touch_t *data)
+     char name[50];
+ #endif
+ 
++    LOGD("-----fht----start---");
+     ret = sensor_get_proper_image(g_image_buffer, image_size, 1);
+     if (ret == SUCCESS) {
+         ret = algorithm_press_detect_texture(g_image_buffer, AUTHENTICATE_DETECT);
+@@ -163,6 +164,7 @@ static void protocol_detect_touch(protocol_detect_touch_t *data)
+         data->response.touched = ret;
+     }
+ 
++    LOGD("-----fht----end---");
+ }
+ 
+ static void protocol_detect_touch_get_energy(protocol_detect_touch_get_energy_t *data)
+diff --git a/fingerprint/service/soft_sensor/sensor83/sensor_wrapper.c b/fingerprint/service/soft_sensor/sensor83/sensor_wrapper.c
+index 00a0f16..887290c 100644
+--- a/fingerprint/service/soft_sensor/sensor83/sensor_wrapper.c
++++ b/fingerprint/service/soft_sensor/sensor83/sensor_wrapper.c
+@@ -38,7 +38,11 @@ typedef struct enroll_context {
+ } enroll_context_t;
+ 
+ typedef struct authenticate_context {
++    int max_count;
++    int temp_count;
+ 	unsigned char remove_bkg_img[IMAGE_SIZE];
++    int max_image[IMAGE_SIZE];
++    int temp_image[IMAGE_SIZE];
+ } authenticate_context_t;
+ 
+ static uint32_t s_navi_result = NAVI_NONE;
+@@ -253,7 +257,7 @@ static int sensor83_get_proper_image(void *img, const int len,
+ 	int ret = SUCCESS;
+ 	int *image = (int *) img;
+ 
+-	LOGD("start.\n");
++	LOGD("------fht-----start.\n");
+ 
+ 	ret = sensor83_capture_mode();
+ 	if (ret) {
+@@ -270,7 +274,7 @@ static int sensor83_get_proper_image(void *img, const int len,
+ 	    ret = save_sensor83_context();
+ 	}
+ 
+-	LOGD("end, ret = %d.\n", ret);
++	LOGD("-----fht----end, ret = %d.\n", ret);
+ 
+ 	return ret;
+ }
+@@ -358,6 +362,7 @@ static int algorithm83_press_detect_texture(void *image, int type) {
+ 
+ 	count = fp83_press_detect(image_in, context_get_sensor83_bkg(), g_sensor83_grey_offset);
+ 	sratio = count * 100 / SIZE;
++    LOGD("---fht------press detect texture count = %d, sratio = %d",count, sratio);
+ //	press_save_bmp(image);
+ 	switch (type) {
+ 	case AUTHENTICATE_DETECT:
+@@ -378,8 +383,21 @@ static int algorithm83_press_detect_texture(void *image, int type) {
+ 	    break;
+ 	}
+ 	if (ret == NORMAL_PRESSED) {
+-		fp83_remove_bkg(image_in, context_get_sensor83_bkg(),
+-			g_auth_ctx->remove_bkg_img, g_enroll_ctx->proc_buf, g_sensor83_grey_offset);
++        LOGD("------fht-------press detect texture   remove bkg image--count = %d, SIZE = %d",count, SIZE);
++        if(g_auth_ctx->temp_count < count){
++            g_auth_ctx->temp_count = count;
++            memcpy(g_auth_ctx->temp_image, image_in, sizeof(g_auth_ctx->max_image));
++        }
++
++        if(g_auth_ctx->max_count < g_auth_ctx->temp_count){
++            memcpy(g_auth_ctx->max_image, g_auth_ctx->temp_image,sizeof(g_auth_ctx->max_image));
++            g_auth_ctx->max_count = g_auth_ctx->temp_count;
++        }
++
++        LOGD("------fht-- count = %d, temp_count = %d, max_count = %d, s_press_times = %ld",count,g_auth_ctx->temp_count,g_auth_ctx->max_count);
++        fp83_remove_bkg(g_auth_ctx->max_image, context_get_sensor83_bkg(),
++                g_auth_ctx->remove_bkg_img, g_enroll_ctx->proc_buf, g_sensor83_grey_offset);
++
+ 		if ((count - g_enroll_ctx->max_count) > (SIZE - g_enroll_ctx->max_count) / 10) {
+ 			memcpy(g_enroll_ctx->max_image, image_in, sizeof(g_enroll_ctx->max_image));
+ 			g_enroll_ctx->max_count = count;
+@@ -389,7 +407,14 @@ static int algorithm83_press_detect_texture(void *image, int type) {
+ 	    s_cnt_img = 0;
+ 	}
+ 
+-	LOGD("count=%d ratio=%d, ret=%d grey offset=0x%x\n", count, sratio, ret, g_sensor83_grey_offset);
++    if(ret == NORMAL_UNPRESSED){
++        LOGD("--------fht-----unpress memset ------");
++        g_auth_ctx->max_count  = 0;
++        g_auth_ctx->temp_count  = 0;
++        memset(g_auth_ctx->max_image, 0, sizeof(g_auth_ctx->max_image));
++        memset(g_auth_ctx->temp_image, 0, sizeof(g_auth_ctx->max_image));
++    }
++	LOGD("------fht----count=%d ratio=%d, ret=%d grey offset=0x%x\n", count, sratio, ret, g_sensor83_grey_offset);
+ 
+ 
+ 	return ret;
+@@ -541,6 +566,7 @@ static int algorithm83_authenticate(int *fid_count, uint32_t *fid) {
+ 	int *tmp_data = g_enroll_ctx->tmp_template;
+ 	int *max_data = g_enroll_ctx->test_template_data;
+ 
++    LOGD("-------fht--start---");
+ 	int isMult = 1, count_down = *fid_count;
+ 	char_num = alg83_extract(g_auth_ctx->remove_bkg_img);
+ 	if(char_num == 0) {
+@@ -572,7 +598,7 @@ match_again:
+ 	}
+ 
+ 	if (ret != 0) {
+-		LOGD("score=%d, char_num=%d, matchArea=%d score_th=%d, temp_idx=%d, temp_num=%d ratio=%d isMult=%d\n",
++		LOGD("---fht---score=%d, char_num=%d, matchArea=%d score_th=%d, temp_idx=%d, temp_num=%d ratio=%d isMult=%d\n",
+ 			last_score, char_num, last_area, g_config.auth_score, last_temp_idx, last_temp_num, sratio, isMult);
+ 		match_save_bmp(ret, char_num);
+ 		LOGD("match successfully.");
+@@ -594,6 +620,7 @@ match_again:
+ 	memset(max_data, 0, sizeof(g_enroll_ctx->test_template_data));
+ 
+ 	*fid = ret;
++    LOGD("-------fht--end---");
+ 	return SUCCESS;
+ }
+ 

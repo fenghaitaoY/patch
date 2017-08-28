@@ -1,0 +1,84 @@
+diff --git a/fingerprint/client/fingerprintso/ma_release_Jnifp.c b/fingerprint/client/fingerprintso/ma_release_Jnifp.c
+index 3b1d220..7938ebf 100644
+--- a/fingerprint/client/fingerprintso/ma_release_Jnifp.c
++++ b/fingerprint/client/fingerprintso/ma_release_Jnifp.c
+@@ -7,6 +7,8 @@
+ #include "config.h"
+ #include "../libfprint/interface/ca_interface.h"
+ #include "hw_auth_token.h"
++#include "../drivercontroller/driver_controller.h"
++#include "../process/process_extern_msg.h"
+ 
+ pthread_t thread;
+ JavaVM *m_vm;
+@@ -25,6 +27,7 @@ jfieldID resultFid;
+ jfieldID ecodeFid;
+ 
+ static int notify(fingerprint_t *fp);
++extern unsigned char *gp_driver_mmap;
+ 
+ //初始化的时候会调进来一次，在这个方法里持有jvm的引用
+ JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM *vm, void *reserved){
+@@ -306,3 +309,23 @@ JNIEXPORT jint JNICALL Java_ma_release_Jnifp_calibrate(JNIEnv *env, jclass cls){
+     return ret;
+     LOGD("end");
+ }
++
++JNIEXPORT jint JNICALL Java_ma_release_Jnifp_getImage(JNIEnv *env, jclass cls, jbyteArray image_out, jint len){
++    LOGD("----------------------------------start");
++    int ret = 0, val = -1;
++    unsigned int cmd = FACTORY_TEST_GET_IMAGE | 0x80000000;
++    ret = dc_send_cmd_with_value(SET_MODE, &cmd);
++    if(ret != 0) {
++        return ret;
++    }
++    if(len % 1024 != 0) {
++        LOGE("transfer error, length must be 1k formatted.");
++        return -1;
++    }
++    if(image_out != NULL){
++        (*env)->SetByteArrayRegion(env, image_out, 0, len,gp_driver_mmap + len);
++    }
++
++    LOGD("-----------------------------------end");
++    return ma_tac_get_energy();
++}
+diff --git a/fingerprint/client/fingerprintso/ma_release_Jnifp.h b/fingerprint/client/fingerprintso/ma_release_Jnifp.h
+index 405a6c1..b434bba 100644
+--- a/fingerprint/client/fingerprintso/ma_release_Jnifp.h
++++ b/fingerprint/client/fingerprintso/ma_release_Jnifp.h
+@@ -103,6 +103,8 @@ JNIEXPORT jint JNICALL Java_ma_release_Jnifp_calibrate
+  */
+ JNIEXPORT jint JNICALL Java_ma_release_Jnifp_testSPI
+   (JNIEnv *, jclass);
++
++JNIEXPORT jint JNICALL Java_ma_release_Jnifp_getImage(JNIEnv *, jclass, jbyteArray, jint);
+ #ifdef __cplusplus
+ }
+ #endif
+diff --git a/fingerprint/client/libfprint/interface/ca_interface.c b/fingerprint/client/libfprint/interface/ca_interface.c
+index 9acdb65..c3f9c5c 100644
+--- a/fingerprint/client/libfprint/interface/ca_interface.c
++++ b/fingerprint/client/libfprint/interface/ca_interface.c
+@@ -88,7 +88,8 @@ int init_navigate(void)
+             if(strcmp(OPERATION_SYSTEM,"Android5.1")==0){
+                 set_idle_cmd(navigate_work, NULL, PROCESS_NAVIGATE);
+             }else{
+-                set_idle_cmd(tap_work_active_afs83, NULL, PROCESS_NAVIGATE);
++                //set_idle_cmd(tap_work_active_afs83, NULL, PROCESS_NAVIGATE);
++                set_idle_cmd(navigate_work, NULL, PROCESS_NAVIGATE);
+             }
+         } else {
+             set_idle_cmd(navigate_work, NULL, PROCESS_NAVIGATE);
+diff --git a/version/test.csv b/version/test.csv
+index ccd4ac2..e7fce1d 100644
+--- a/version/test.csv
++++ b/version/test.csv
+@@ -12,6 +12,7 @@ Default,Android,4.0.00,A121_N,Watchtrust,x86_64,Android6.0,Yes,Yes,Yes,No,14,3
+ Default,Android,4.0.00,A121_N,Nutlet,arm64-v8a,Android6.0,Yes,Yes,Yes,No,14,3
+ Default,Android,4.0.00,A121_N,Microtrust,arm64-v8a,Android6.0,Yes,Yes,Yes,No,14,3
+ Default,Android,4.0.00,A83_N,Android,armeabi,Android6.0,Yes,Yes,Yes,No,21,3
++Default,Android,4.0.00,A83_T,Android,armeabi arm64-v8a,Android6.0,Yes,Yes,Yes,No,21,3
+ Default,Android,4.0.00,A80_T,Android,armeabi,Android6.0,Yes,Yes,Yes,No,14,3
+ Default,Android,4.0.00,A80_T&A83_N,Android,armeabi,Android6.0,Yes,Yes,Yes,No,21,3
+ Default,Android,4.0.00,A121_N,Android,arm64-v8a,Ali5.1,Yes,Yes,Yes,No,14,3

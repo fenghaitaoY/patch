@@ -1,0 +1,13 @@
+diff --git a/fingerprint/service/soft_sensor/sensor96/sensor_wrapper.c b/fingerprint/service/soft_sensor/sensor96/sensor_wrapper.c
+index be2f51b..aafe749 100644
+--- a/fingerprint/service/soft_sensor/sensor96/sensor_wrapper.c
++++ b/fingerprint/service/soft_sensor/sensor96/sensor_wrapper.c
+@@ -435,7 +435,7 @@ match_again:
+     } else {
+         if(isMult==1) {
+             isMult = 0;
+-            goto match_again;
++            //goto match_again;
+         } else if(count_down == 0) {
+             match_save_bmp(ret, char_num);
+             LOGD("score=%d, char_num=%d, matchArea=%d score_th=%d, ratio=%d\n",

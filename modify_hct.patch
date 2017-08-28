@@ -1,0 +1,326 @@
+diff --git a/driver/android6.0/ioctl_cmd.h b/driver/android6.0/ioctl_cmd.h
+index e77ebcb..5719268 100644
+--- a/driver/android6.0/ioctl_cmd.h
++++ b/driver/android6.0/ioctl_cmd.h
+@@ -61,6 +61,6 @@
+ #define GET_SCREEN_STATUS		_IOR(MA_IOC_MAGIC, 47, unsigned int)
+ #define WAKE_UP_SCREEN_STATUS   _IO(MA_IOC_MAGIC, 48)
+ #define MA_POWER_ON             _IO(MA_IOC_MAGIC, 49)
+-
++#define MA_POWER_RESET          _IO(MA_IOC_MAGIC, 45)
+ #endif /* __IOCTL_CMD_H__ */
+ 
+diff --git a/fingerprint/client/fingerprintso/fingerprint.c b/fingerprint/client/fingerprintso/fingerprint.c
+index 92fb035..a52d16f 100644
+--- a/fingerprint/client/fingerprintso/fingerprint.c
++++ b/fingerprint/client/fingerprintso/fingerprint.c
+@@ -171,8 +171,8 @@ fingerprint_module_t HAL_MODULE_INFO_SYM = {
+ 		.tag                = HARDWARE_MODULE_TAG,
+ 		.module_api_version = FINGERPRINT_MODULE_API_VERSION_2_0,
+ 		.hal_api_version    = HARDWARE_HAL_API_VERSION,
+-		.id                 = FINGERPRINT_HARDWARE_MODULE_ID,
+-//		.id                 = "microarray.fingerprint",
++//		.id                 = FINGERPRINT_HARDWARE_MODULE_ID,
++		.id                 = "microarray.fingerprint",
+ 		.name               = "Microarray Fingerprint HAL",
+ 		.author             = "Microarray",
+ 		.methods            = &fingerprint_module_methods,
+diff --git a/fingerprint/client/libfprint/interface/ca_interface.c b/fingerprint/client/libfprint/interface/ca_interface.c
+index 1131c35..df43328 100644
+--- a/fingerprint/client/libfprint/interface/ca_interface.c
++++ b/fingerprint/client/libfprint/interface/ca_interface.c
+@@ -114,7 +114,7 @@ int bio_cancel(void)
+ 	s_is_canceld = 1;
+     cancel_cmd();
+     
+-    ma_tac_cancel();
++    //ma_tac_cancel();
+ 
+ 
+ 
+diff --git a/fingerprint/client/libfprint/process/authenticate.c b/fingerprint/client/libfprint/process/authenticate.c
+index 276552e..dd84ccc 100644
+--- a/fingerprint/client/libfprint/process/authenticate.c
++++ b/fingerprint/client/libfprint/process/authenticate.c
+@@ -70,6 +70,10 @@ static int verify(struct cmd_entry *qe)
+ 			LOGE("do_verify call function failed\n");
+ 			return 0;
+ 		}
++        if(qe->cancelled){
++            LOGD("command cancelled \n");
++            return 0;
++        }
+ 		if (fid) {
+ 			dc_send_cmd(TIMEOUT_WAKELOCK);
+ 			authenticate_notify(cmd_auth->gid, fid, gHat);
+@@ -112,6 +116,7 @@ static int verify(struct cmd_entry *qe)
+ 			return 0;
+ 		}
+ 	    down = ma_tac_detectTouch_getEnergy();
++        LOGD("------------------------------authen down = %d",down);
+ 	    if(down < 0) {
+ 	        error_notify(FINGERPRINT_ERROR_HW_UNAVAILABLE);
+ 	        break;
+@@ -145,6 +150,8 @@ void* authenticate_work(void *q)
+ 	int r = 0;
+ 	int count = 0;
+ 	int cancelflag = 0;
++	int chipid = -1;
++	int cover_type = -1;
+ 	static int s_interrupt_error_trigger_count;
+ 	struct cmd_entry *qe = (struct cmd_entry *) q;
+ 	struct cmd_auth_data *cmd_auth = (struct cmd_auth_data *) qe->parameter;
+@@ -168,6 +175,24 @@ void* authenticate_work(void *q)
+ 			//TODO  change the logic/
+ 			LOGD("go to kernel\n");
+ 			dc_send_cmd(SLEEP);
++#if defined(A80) || defined(A83)
++			//esd procedure START
++			chipid = ma_tac_factory_get_vendor();
++			LOGD("resume1 chipid=%d \n",chipid);
++
++			while(chipid != 0x53 && chipid != 0x50) {
++				if (qe->cancelled) {
++					LOGD("authenticate cancelled\n");
++					return NULL;
++				}
++
++				dc_send_cmd(MA_POWER_RESET);//power reset
++				
++				chipid = ma_tac_factory_get_vendor();
++				LOGD("resume2 chipid=%d \n",chipid);
++			}
++			//esd procedure END
++#endif
+ 			if ( qe->cancelled ) {
+ 				LOGD("command cancelled\n");
+ 				return 0;
+diff --git a/fingerprint/client/libfprint/process/enrollcalibrate.c b/fingerprint/client/libfprint/process/enrollcalibrate.c
+index 01d4f19..d9d5aa1 100644
+--- a/fingerprint/client/libfprint/process/enrollcalibrate.c
++++ b/fingerprint/client/libfprint/process/enrollcalibrate.c
+@@ -99,7 +99,7 @@ void* enrollcalibrate_work(void * q)
+                         }
+                     } else if (ret == ERROR_EXTRACT_FAIL) {
+                     	LOGD("image extract fail.");
+-                    	acquired_event_notify(FINGERPRINT_ACQUIRED_INSUFFICIENT);
++                    	acquired_event_notify(FINGERPRINT_ACQUIRED_TOO_FAST);
+                     } else if (ret == ERROR_ENROLL_DUPLICATE_AREA) {
+                     	duplicate_area_num++;
+                     	if(duplicate_area_num<10) {
+diff --git a/fingerprint/client/libfprint/process/process.c b/fingerprint/client/libfprint/process/process.c
+index 0363df5..f07f949 100644
+--- a/fingerprint/client/libfprint/process/process.c
++++ b/fingerprint/client/libfprint/process/process.c
+@@ -109,6 +109,8 @@ static void *fingerprint_hal_main_thread(void *p)
+     struct cmd_entry *qe;
+     (void) p;
+     init_cmd_fifo2();
++	int chipid = -1;
++	int cover_type = -1;
+     // endless
+     while ( 1 )
+     {
+@@ -121,15 +123,25 @@ static void *fingerprint_hal_main_thread(void *p)
+             break;
+         }
+         LOGD("Command %s is running\n", _num2string(qe->state));
+-
+-        qe->cmd_process(qe);
+-
+-        if(sThreadExit){
+-            break;
+-        }
+-        LOGD("Command %s execute end, start to fetch next.\n", _num2string(qe->state));
+-    }
+-    return NULL;
++#if defined(A83) || defined(A80)
++		//esd procedure START
++		chipid = ma_tac_factory_get_vendor();
++		LOGD("read chipid = %d !!!!!!!!!", chipid);
++		if (chipid != 0x53 && chipid != 0x50) {
++			dc_send_cmd(MA_POWER_RESET);
++			LOGD("power reset !!!!!!!!!!!");
++		}
++		//esd procedure END
++#endif
++		ma_tac_detect_touch();
++		qe->cmd_process(qe);
++		ma_tac_cancel();
++		if(sThreadExit){	
++			break;
++		}
++		LOGD("Command %s execute end, start to fetch next.\n", _num2string(qe->state));
++	}
++	return NULL;
+ }
+ 
+ ////////////////process api////////////////////////
+diff --git a/fingerprint/client/libfprint/process/refresh.c b/fingerprint/client/libfprint/process/refresh.c
+index c757351..892ab98 100644
+--- a/fingerprint/client/libfprint/process/refresh.c
++++ b/fingerprint/client/libfprint/process/refresh.c
+@@ -140,7 +140,7 @@ void refresh_timer(void) {
+         LOGD("s_chip_id = %d, cover_type = %d", s_chip_id, g_config.cover_type);
+         set_refresh(1, 5, 60, handler_calibrate_data);
+     }
+-    set_refresh(1, 600, MAX_TIMES, handler_interrupt_parameters);
++    set_refresh(1, 60, MAX_TIMES, handler_interrupt_parameters);
+     handler(0);
+     LOGD("end.\n");
+ }
+diff --git a/fingerprint/client/libfprint/utils/ma_utils.c b/fingerprint/client/libfprint/utils/ma_utils.c
+index 85ad7d4..db99891 100644
+--- a/fingerprint/client/libfprint/utils/ma_utils.c
++++ b/fingerprint/client/libfprint/utils/ma_utils.c
+@@ -163,7 +163,7 @@ void init_properties(int chip_id, int cover_type, microarray_properties_t *prope
+ 	properties->enroll_times = property_get_int32(KEY_ENROLL_TIMES, ENROLL_TIMES);
+     properties->auth_retry_times = property_get_int32(KEY_AUTH_RETRY_TIMES, AUTH_RETRY_TIMES);
+     properties->long_tap_time = property_get_int32(KEY_LONG_TAP_TIME, 600);//unit ms
+-    properties->enroll_fast_num = property_get_int32(KEY_ENROLL_FAST_NUM, 0);
++    properties->enroll_fast_num = property_get_int32(KEY_ENROLL_FAST_NUM, 2);
+ 
+     get_device_serial_no(properties->device_serial_no);
+ 
+diff --git a/fingerprint/service/policy/policy.c b/fingerprint/service/policy/policy.c
+index c70df9a..9adc190 100644
+--- a/fingerprint/service/policy/policy.c
++++ b/fingerprint/service/policy/policy.c
+@@ -82,6 +82,7 @@ int policy_get_sensor_para(const char* name, void* out_value, int out_value_size
+ 	ret = platform_fs_read(property_name, out_value, out_value_size);
+ 	LOGD("ret = %d\n", ret);
+ 	if(ret == ERROR_FILE_NOT_EXIST) {
++#ifdef PLATFORM_ANDROID
+ 		#if (defined (A121) && defined(OEM_HCT))
+ 			platform_fs_write(property_name, out_value, out_value_size);//add 18
+ 			s_is_load_old_data = 1;
+@@ -89,7 +90,7 @@ int policy_get_sensor_para(const char* name, void* out_value, int out_value_size
+ 	    #else
+ 			policy_get_old_sensor_para(property_name, out_value, out_value_size);
+     	#endif
+-	    
++#endif
+ 	}
+ 	return ret;
+ }
+@@ -167,6 +168,7 @@ int policy_init_template(char* head, int fp_temp_size)
+ 	if(1 == s_is_load_old_data) {
+ 	    LOGD("remove/data/system/users/0/fpdata/fprint.db\n");
+ 	    remove("/data/system/users/0/fpdata/fprint.db");
++        s_is_load_old_data = 0;
+ 	}
+ #endif
+ #endif
+diff --git a/fingerprint/service/soft_sensor/sensor120/sensor_wrapper.c b/fingerprint/service/soft_sensor/sensor120/sensor_wrapper.c
+index 86f4450..6fcfca2 100644
+--- a/fingerprint/service/soft_sensor/sensor120/sensor_wrapper.c
++++ b/fingerprint/service/soft_sensor/sensor120/sensor_wrapper.c
+@@ -470,7 +470,7 @@ match_again:
+     } else {
+         if(isMult == 1 && g_isenroll == 0){
+             isMult = 0;
+-            goto match_again;
++            //goto match_again;
+         }else if(count_down == 0){
+             match_save_bmp(ret, char_num);
+             LOGD("score=%d, char_num=%d, matchArea=%d,score_th=%d\n",score,char_num,area,g_config.auth_score);
+diff --git a/fingerprint/service/soft_sensor/sensor83/sensor_83.c b/fingerprint/service/soft_sensor/sensor83/sensor_83.c
+index 2069591..0133732 100644
+--- a/fingerprint/service/soft_sensor/sensor83/sensor_83.c
++++ b/fingerprint/service/soft_sensor/sensor83/sensor_83.c
+@@ -855,13 +855,15 @@ static int calc_refdrvsel(int *bkg_grey_avg)
+ {
+     int ret = SUCCESS;
+     int buf[IMAGE_SIZE];
++    unsigned char refdrv = 0;
+ 
+     ret = fp83_calc_close_driver_refdrvsel(bkg_grey_avg);
+     if(ret == SUCCESS) {
+         if(g_config.cover_type != COVER_S2 && g_config.cover_type != COVER_S3) {
+             context_set_sensor83_refdrvsel(g_close_driver_refdrvsel);
+             fp83_capture_mode();
+-            sensor_set_register(MA_83_REF_DRV_REG, g_close_driver_refdrvsel & 0xdf);
++            context_get_sensor83_refdrv(&refdrv);
++            sensor_set_register(MA_83_REF_DRV_REG, refdrv & 0xdf);
+             fp83_read_image(buf, IMAGE_SIZE, 1);
+             context_set_sensor83_bkg(buf);
+         } else {
+diff --git a/fingerprint/service/soft_sensor/sensor83/sensor_wrapper.c b/fingerprint/service/soft_sensor/sensor83/sensor_wrapper.c
+index a2dd0df..ca8ca7a 100644
+--- a/fingerprint/service/soft_sensor/sensor83/sensor_wrapper.c
++++ b/fingerprint/service/soft_sensor/sensor83/sensor_wrapper.c
+@@ -256,6 +256,7 @@ static int sensor83_get_proper_image(void *img, const int len,
+ 		const int line_step) {
+ 	int ret = SUCCESS;
+ 	int *image = (int *) img;
++    int checkgrey = SUCCESS;
+ 
+ 	// int grey = 0;
+ 	LOGD("start.\n");
+@@ -265,9 +266,9 @@ static int sensor83_get_proper_image(void *img, const int len,
+ 		return ret;
+ 	}
+ 	fp83_read_image(image, len, line_step);
+-	ret = check_grey(image);
++	checkgrey = check_grey(image);
+ 
+-	if(ret != SUCCESS) {
++	if(checkgrey != SUCCESS) {
+ 	    sensor83_refresh_calibrate_data();
+ 	}
+ 
+diff --git a/fingerprint/service/soft_sensor/sensor96/sensor_96.c b/fingerprint/service/soft_sensor/sensor96/sensor_96.c
+index cb4378e..bdd99b1 100644
+--- a/fingerprint/service/soft_sensor/sensor96/sensor_96.c
++++ b/fingerprint/service/soft_sensor/sensor96/sensor_96.c
+@@ -26,6 +26,7 @@
+ 
+ static int s_sensor_mode;
+ static int s_interrupt_delay_ms = 40;
++const int g_sid03_drv_val = 0x01;
+ 
+ /*初始化
+  * @return: -1：内存分配失败；0：成功，1：未校准
+diff --git a/version/product.csv b/version/product.csv
+index 31f5c65..00d02af 100644
+--- a/version/product.csv
++++ b/version/product.csv
+@@ -6,6 +6,7 @@ Android,Tianyida,4.0.00,A80_T,Android,armeabi,Android6.0,Yes,Yes,Yes,No,14,3
+ Android,Tianyida,4.0.00,A121_N&A120_N,Android,arm64-v8a armeabi,Android6.0,Yes,Yes,Yes,No,14,3
+ Android,Hct,4.0.00,A121_N,Android,arm64-v8a,Android6.0,Yes,Yes,Yes,No,14,3
+ Android,Hct,4.0.00,A121_N&A120_N,Android,arm64-v8a armeabi,Android6.0,Yes,Yes,Yes,No,14,3
++Android,Hct,4.0.00,A121_N&A120_N,Trustkernel,arm64-v8a armeabi,Android6.0,Yes,Yes,Yes,No,14,1
+ A57,MAISUI,4.0.00,A80_T&A83_N,Trustkernel,arm64-v8a armeabi,Android6.0,Yes,Yes,No,No,12,3
+ X5088B,MAISUI,4.0.00,A96_N,Trustkernel,arm64-v8a armeabi,Android7.0,No,Yes,No,No,14,3
+ E2_OVERSEA,Konka,4.0.00,A80_T,Android,arm64-v8a,Android6.0,Yes,Yes,Yes,No,14,3
+diff --git a/version/test.csv b/version/test.csv
+index d7b9560..f948b72 100644
+--- a/version/test.csv
++++ b/version/test.csv
+@@ -4,7 +4,7 @@ Default,Android,4.0.00,A96_N,Android,arm64-v8a,Android6.0,Yes,Yes,Yes,No,14,3
+ Default,Android,4.0.00,A121_N,Android,armeabi,Android6.0,Yes,Yes,Yes,No,14,3
+ Default,Android,4.0.00,A96_N,Android,armeabi,Android6.0,Yes,Yes,Yes,No,14,3
+ Default,Android,4.0.00,A82_N,Android,armeabi,Android6.0,Yes,Yes,Yes,No,14,3
+-Default,Android,4.0.00,A120_N,Trustkernel,armeabi arm64-v8a,Android6.0,Yes,Yes,Yes,No,14,3
++Default,Android,4.0.00,A120_N,Trustkernel,armeabi,Android6.0,Yes,Yes,Yes,No,14,3
+ Default,Android,4.0.00,A121_N,YUNOS,arm64-v8a,Android6.0,Yes,Yes,Yes,No,14,3
+ Default,Android,4.0.00,A121_N,YUNOS,armeabi,Android6.0,Yes,Yes,Yes,No,14,3
+ Default,Android,4.0.00,A121_N,Watchtrust,x86,Android6.0,Yes,Yes,Yes,No,14,3
+@@ -20,7 +20,7 @@ Default,Android,4.0.00,A120_N,Android,arm64-v8a,Android6.0,Yes,Yes,Yes,No,14,3
+ Default,Android,4.0.00,A120_N,Android,armeabi,Android6.0,Yes,Yes,Yes,No,14,3
+ Default,Android,4.0.00,A120_N,Trustkernel,armeabi arm64-v8a,Android6.0,Yes,Yes,Yes,No,14,3
+ Default,Android,4.0.00,A83_N,Android,arm64-v8a,Android6.0,Yes,Yes,Yes,No,14,3
+-Default,Android,4.0.00,A80_T&A83_N,Android,arm64-v8a,Android6.0,Yes,Yes,Yes,No,14,3
++Default,Android,4.0.00,A80_T&A83_N,Android,arm64-v8a armeabi,Android6.0,Yes,Yes,Yes,No,14,3
+ Default,Android,4.0.00,A121_N,Trustonic,arm64-v8a,Android6.0,Yes,Yes,Yes,No,14,3
+ Default,Android,4.0.00,A120_N,Android,armeabi arm64-v8a,Android5.1,Yes,Yes,Yes,No,14,3
+ Default,Android,4.0.00,A121_N,Android,armeabi arm64-v8a,Android5.1,Yes,Yes,Yes,No,14,3
+@@ -29,7 +29,7 @@ Default,Android,4.0.00,A80_T,Android,armeabi arm64-v8a,Android5.1,Yes,Yes,Yes,No
+ Default,Android,4.0.00,A96_N,Android,armeabi arm64-v8a,Android5.1,Yes,Yes,Yes,No,14,3
+ Default,Android,4.0.00,A120_T,Android,armeabi arm64-v8a,Android5.1,Yes,Yes,Yes,No,14,3
+ Default,Android,4.0.00,A120_T,Android,armeabi arm64-v8a,Android6.0,Yes,Yes,Yes,No,14,3
+-Default,Android,4.0.00,A96_N,Trustkernel,arm64-v8a,Android6.0,Yes,Yes,Yes,No,14,3
++Default,Android,4.0.00,A96_N,Trustkernel,arm64-v8a armeabi,Android6.0,Yes,Yes,Yes,No,14,3
+ Default,Android,4.0.00,A120_N,Microtrust,armeabi arm64-v8a,Android6.0,Yes,Yes,Yes,No,14,3
+ Default,Android,4.0.00,A96_N,Microtrust,arm64-v8a,Android6.0,Yes,Yes,Yes,No,14,3
+ Default,Android,4.0.00,A96_N,Trustonic,armeabi,Android6.0,Yes,Yes,Yes,No,14,3

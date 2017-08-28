@@ -1,0 +1,100 @@
+diff --git a/fingerprint/client/libfprint/include/globalvar.h b/fingerprint/client/libfprint/include/globalvar.h
+index 694d6b6..818e852 100644
+--- a/fingerprint/client/libfprint/include/globalvar.h
++++ b/fingerprint/client/libfprint/include/globalvar.h
+@@ -26,6 +26,7 @@ enum fp_acquired_info {
+ 
+ extern int gNotCalibrated;
+ extern hw_auth_token_t *gHat;
++extern int gWorkState;
+ 
+ extern microarray_properties_t g_config;
+ 
+diff --git a/fingerprint/client/libfprint/interface/ca_interface.c b/fingerprint/client/libfprint/interface/ca_interface.c
+index 7197eae..8db9f2a 100644
+--- a/fingerprint/client/libfprint/interface/ca_interface.c
++++ b/fingerprint/client/libfprint/interface/ca_interface.c
+@@ -24,6 +24,7 @@ microarray_properties_t g_config;
+ 
+ static int s_is_canceld = 0; //for duplicate cancel detect
+ static int is_init = 0;
++static int state;
+ 
+ ////////////////////////////////////////////////////////////////
+ 
+@@ -63,7 +64,7 @@ int bio_authenticate(uint64_t operation_id, uint32_t gid)
+     cmd_auth.operation_id = operation_id;
+     cmd_auth.gid = gid;
+     enqueue_cmd(authenticate_work, (void*)&cmd_auth, PROCESS_AUTHENTICATE);
+-
++    state = PROCESS_AUTHENTICATE;
+     LOGD("end.\n");
+ 
+     return 0;
+@@ -101,6 +102,10 @@ int bio_cancel(void)
+ 	    LOGD("duplicate cancel.\n");
+ 	    return 0;
+ 	}
++    LOGD("------gWorkState = %d, state = %d\n",gWorkState, state);
++    if(gWorkState == PROCESS_IDLE_NAVIGATE && state == PROCESS_AUTHENTICATE){
++        return 0;
++    }
+ 	s_is_canceld = 1;
+ 	ma_tac_cancel();
+ 	cancel_cmd();
+@@ -149,6 +154,7 @@ int bio_enroll(uint32_t gid, uint32_t timeout_sec,const hw_auth_token_t *token)
+     // warning const set to unconst
+     cmd_enrollcalibrate.token = token;
+     enqueue_cmd(enrollcalibrate_work, (void*)&cmd_enrollcalibrate, PROCESS_ENROLLCALIBRATE);
++    state = PROCESS_ENROLLCALIBRATE;
+     LOGD("end.\n");
+ 
+     return 0;
+diff --git a/fingerprint/client/libfprint/process/enrollcalibrate.c b/fingerprint/client/libfprint/process/enrollcalibrate.c
+index 09be1c5..01ad384 100644
+--- a/fingerprint/client/libfprint/process/enrollcalibrate.c
++++ b/fingerprint/client/libfprint/process/enrollcalibrate.c
+@@ -50,6 +50,7 @@ void* enrollcalibrate_work(void * q)
+         // has finger
+         if (!cancelflag && down) {
+             // enroll
++            acquired_event_notify(FINGERPRINT_ACQUIRED_GOOD);//添加灭屏后触摸指纹亮屏
+             if ( !cancelflag ) {
+                 if(presscount > 0) {
+                     LOGD(" too fast");
+diff --git a/fingerprint/client/libfprint/process/process.c b/fingerprint/client/libfprint/process/process.c
+index 7a3da4a..df6273a 100644
+--- a/fingerprint/client/libfprint/process/process.c
++++ b/fingerprint/client/libfprint/process/process.c
+@@ -25,7 +25,7 @@ struct cmd_entry g_cmd_tmp; //cmd entry stack
+ struct cmd_entry g_idle_cmd;
+ 
+ int g_factory_test = 0;
+-
++int gWorkState = 0;
+ /*将cmd编号转换成字符串输出
+  * @num cmd编号
+  */
+@@ -122,6 +122,9 @@ static void *fingerprint_hal_main_thread(void *p)
+         }
+         LOGD("Command %s is running\n", _num2string(qe->state));
+ 
++        gWorkState = qe->state;
++        LOGD("-------------gWorkState = %d ",gWorkState);
++
+         qe->cmd_process(qe);
+ 
+         if(sThreadExit){
+diff --git a/fingerprint/include/config.h b/fingerprint/include/config.h
+index a3df9ee..c7b9a10 100644
+--- a/fingerprint/include/config.h
++++ b/fingerprint/include/config.h
+@@ -47,7 +47,7 @@ enum navigation_result {
+ //#define TEMPLATE_SIZE 3664
+ #define DEFAULT_ENERGY_THRESHOLD_A121                    200
+ #define DEFAULT_DETECT_THRESHOLD_A121                    128
+-#define DEFAULT_AUTHENTICATE_SCORE_A121                  75
++#define DEFAULT_AUTHENTICATE_SCORE_A121                  80
+ #define DEFAULT_AUTHENTICATE_LEVEL_A121                  4
+ #define DEFAULT_AUTHENTICATE_CHARACTERISTIC_NUM_A121     1
+ #endif

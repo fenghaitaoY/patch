@@ -1,0 +1,71 @@
+diff --git a/fingerprint/client/libfprint/interface/ca_interface.c b/fingerprint/client/libfprint/interface/ca_interface.c
+index e88bfe9..0e745d7 100644
+--- a/fingerprint/client/libfprint/interface/ca_interface.c
++++ b/fingerprint/client/libfprint/interface/ca_interface.c
+@@ -85,7 +85,11 @@ int init_navigate(void)
+         set_idle_cmd(tap_work_active, NULL, PROCESS_NAVIGATE);
+ #else
+         if(s_chip_id == 83) {
+-            set_idle_cmd(tap_work_active_afs83, NULL, PROCESS_NAVIGATE);
++            if(strcmp(OPERATION_SYSTEM,"Android5.1")==0){
++                set_idle_cmd(navigate_work, NULL, PROCESS_NAVIGATE);
++            }else{
++                set_idle_cmd(tap_work_active_afs83, NULL, PROCESS_NAVIGATE);
++            }
+         } else {
+             set_idle_cmd(navigate_work, NULL, PROCESS_NAVIGATE);
+         }
+diff --git a/fingerprint/include/config.h b/fingerprint/include/config.h
+index b96f0d1..d8c0fd0 100644
+--- a/fingerprint/include/config.h
++++ b/fingerprint/include/config.h
+@@ -20,6 +20,7 @@
+ #define DEFAULT_USER_GROUP                          0
+ #define DEFAULT_STORAGE_PATH                        "/data/system/users/0/fpdata"
+ #define DEFAULT_STORAGE_PROPERTY_PATH               "/data/system/ma_fingerprint"
++#define DEFAULT_STORAGE_PROPERTY_PATH_L_VERSION     "/data/data/ma.fprint/files"
+ 
+ enum navigation_result {
+     NAVI_NONE          = 0,
+diff --git a/fingerprint/service/policy/policy.c b/fingerprint/service/policy/policy.c
+index c2dae3d..c75e3e3 100644
+--- a/fingerprint/service/policy/policy.c
++++ b/fingerprint/service/policy/policy.c
+@@ -37,7 +37,11 @@ int policy_set_sensor_para(const char* name, void* value, int size)
+ 	int ret;
+ 	char property_name[TEMPLATE_NAME_LENGTH];
+ 	memset(property_name, 0, TEMPLATE_NAME_LENGTH);
+-	snprintf(property_name, TEMPLATE_NAME_LENGTH, PROPERTY_NAME_FORMAT, DEFAULT_STORAGE_PROPERTY_PATH, name);
++    if(strcmp(OPERATION_SYSTEM,"Android5.1")==0){
++        snprintf(property_name, TEMPLATE_NAME_LENGTH, PROPERTY_NAME_FORMAT, DEFAULT_STORAGE_PROPERTY_PATH_L_VERSION, name);
++    }else{
++        snprintf(property_name, TEMPLATE_NAME_LENGTH, PROPERTY_NAME_FORMAT, DEFAULT_STORAGE_PROPERTY_PATH, name);
++    }
+ 	ret = platform_fs_write(property_name, value, size);
+ 
+ 	return ret;
+@@ -69,7 +73,11 @@ int policy_get_sensor_para(const char* name, void* out_value, int out_value_size
+ 	int ret = SUCCESS;
+ 	char property_name[TEMPLATE_NAME_LENGTH];
+ 	memset(property_name, 0, TEMPLATE_NAME_LENGTH);
+-	snprintf(property_name, TEMPLATE_NAME_LENGTH, PROPERTY_NAME_FORMAT, DEFAULT_STORAGE_PROPERTY_PATH, name);
++    if(strcmp(OPERATION_SYSTEM,"Android5.1")==0){
++        snprintf(property_name, TEMPLATE_NAME_LENGTH, PROPERTY_NAME_FORMAT, DEFAULT_STORAGE_PROPERTY_PATH_L_VERSION, name);
++    }else{
++        snprintf(property_name, TEMPLATE_NAME_LENGTH, PROPERTY_NAME_FORMAT, DEFAULT_STORAGE_PROPERTY_PATH, name);
++    }
+ 
+ 	ret = platform_fs_read(property_name, out_value, out_value_size);
+ 	LOGD("ret = %d\n", ret);
+diff --git a/version/test.csv b/version/test.csv
+index 0625d4e..a14beae 100644
+--- a/version/test.csv
++++ b/version/test.csv
+@@ -24,6 +24,7 @@ Default,Android,4.0.00,A121_N,Trustonic,arm64-v8a,Android6.0,Yes,Yes,Yes,No,14,3
+ Default,Android,4.0.00,A120_N,Android,armeabi arm64-v8a,Android5.1,Yes,Yes,Yes,No,14,3
+ Default,Android,4.0.00,A121_N,Android,armeabi arm64-v8a,Android5.1,Yes,Yes,Yes,No,14,3
+ Default,Android,4.0.00,A83_N,Android,armeabi arm64-v8a,Android5.1,Yes,Yes,Yes,No,14,3
++Default,Android,4.0.00,A83_T,Android,armeabi arm64-v8a,Android5.1,Yes,Yes,Yes,No,14,3
+ Default,Android,4.0.00,A80_T,Android,armeabi arm64-v8a,Android5.1,Yes,Yes,Yes,No,14,3
+ Default,Android,4.0.00,A96_N&A112UM_N,Android,armeabi arm64-v8a,Android5.1,Yes,Yes,Yes,No,14,3
+ Default,Android,4.0.00,A120_T,Android,armeabi arm64-v8a,Android5.1,Yes,Yes,Yes,No,14,3

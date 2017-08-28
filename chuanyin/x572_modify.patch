@@ -1,0 +1,226 @@
+diff --git a/fingerprint/client/libfprint/tac/microarray_tac.c b/fingerprint/client/libfprint/tac/microarray_tac.c
+index 0827fb8..d630a2b 100644
+--- a/fingerprint/client/libfprint/tac/microarray_tac.c
++++ b/fingerprint/client/libfprint/tac/microarray_tac.c
+@@ -214,7 +214,7 @@ int ma_tac_do_verify(int *fid_count, uint32_t *fid, int count, hw_auth_token_t *
+ 	}
+ 	*fid = msg.response.fid;
+ 	*fid_count = msg.response.fid_count;
+-	LOGD("fid=%u, fid_count=%d\n", *fid, *fid_count);
++	LOGD("-----------fid=%u, fid_count=%d\n", *fid, *fid_count);
+ 	memcpy(hat, &(msg.response.hat), sizeof(hw_auth_token_t));
+ 	#ifdef TAC_DEBUG_SAVE_FILE
+ 	save_auth_image(msg.response.fid, msg.response.image);
+diff --git a/fingerprint/client/libfprint/utils/ma_utils.c b/fingerprint/client/libfprint/utils/ma_utils.c
+index b3fa1d7..f11a073 100644
+--- a/fingerprint/client/libfprint/utils/ma_utils.c
++++ b/fingerprint/client/libfprint/utils/ma_utils.c
+@@ -176,9 +176,9 @@ void init_properties(int chip_id, int cover_type, microarray_properties_t *prope
+     properties->filter_duplicate_enroll = property_get_int32(KEY_FILTER_DUPLICATE_ENROLL, FILTER_DUPLICATE_ENROLL);
+ 	properties->filter_part_touch_enroll = property_get_int32(KEY_FILTER_PART_TOUCH_ENROLL, FILTER_PART_TOUCH_ENROLL);
+ 	properties->enroll_times = property_get_int32(KEY_ENROLL_TIMES, ENROLL_TIMES);
+-    properties->auth_retry_times = property_get_int32(KEY_AUTH_RETRY_TIMES, AUTH_RETRY_TIMES);
++    properties->auth_retry_times = property_get_int32(KEY_AUTH_RETRY_TIMES, 0);
+     properties->long_tap_time = property_get_int32(KEY_LONG_TAP_TIME, 600);//unit ms
+-    properties->enroll_fast_num = property_get_int32(KEY_ENROLL_FAST_NUM, 0);
++    properties->enroll_fast_num = property_get_int32(KEY_ENROLL_FAST_NUM, 1);
+ 
+     get_device_serial_no(properties->device_serial_no);
+ 
+diff --git a/fingerprint/service/malib/Android.mk b/fingerprint/service/malib/Android.mk
+index e2c73fe..de81275 100644
+--- a/fingerprint/service/malib/Android.mk
++++ b/fingerprint/service/malib/Android.mk
+@@ -11,9 +11,9 @@ LOCAL_SRC_FILES := \
+ 	utils/malib.c \
+ 	utils/mastring.c \
+ 	utils/malog.c \
+-	utils/masnprintf.c
+-	#utils/bitmap.c\
+-	#pgm/pgm.c
++	utils/masnprintf.c \
++	utils/bitmap.c\
++	pgm/pgm.c
+ 
+ LOCAL_MODULE := malib
+ 
+diff --git a/fingerprint/service/soft_sensor/sensor83/sensor_wrapper.c b/fingerprint/service/soft_sensor/sensor83/sensor_wrapper.c
+index 52fbc78..01c5e82 100644
+--- a/fingerprint/service/soft_sensor/sensor83/sensor_wrapper.c
++++ b/fingerprint/service/soft_sensor/sensor83/sensor_wrapper.c
+@@ -26,6 +26,10 @@ static int g_init_enroll = 1;
+ static int s_update_flag = 1;
+ static struct fp_template g_template[FINGERPRINT_SIZE];
+ static int sratio = 0;
++static int g_auth_ready = 0;
++struct timespec g_check_time, g_check_end_time;
++long s_press_times = 0;
++static int g_first_press_get_time = 1;
+ 
+ typedef struct enroll_context {
+ 	uint32_t finger_id;
+@@ -39,7 +43,11 @@ typedef struct enroll_context {
+ } enroll_context_t;
+ 
+ typedef struct authenticate_context {
++    int max_count;
++    int temp_count;
+ 	unsigned char remove_bkg_img[IMAGE_SIZE];
++    int max_image[IMAGE_SIZE];
++    int temp_image[IMAGE_SIZE];
+ } authenticate_context_t;
+ 
+ static uint32_t s_navi_result = NAVI_NONE;
+@@ -360,6 +368,7 @@ static int algorithm83_press_detect_texture(void *image, int type) {
+ 
+ 	count = fp83_press_detect(image_in, context_get_sensor83_bkg(), g_sensor83_grey_offset);
+ 	sratio = count * 100 / SIZE;
++    LOGD("---------press detect texture count = %d, sratio = %d",count, sratio);
+ //	press_save_bmp(image);
+ 	switch (type) {
+ 	case AUTHENTICATE_DETECT:
+@@ -380,8 +389,33 @@ static int algorithm83_press_detect_texture(void *image, int type) {
+ 	    break;
+ 	}
+ 	if (ret == NORMAL_PRESSED) {
+-		fp83_remove_bkg(image_in, context_get_sensor83_bkg(),
+-			g_auth_ctx->remove_bkg_img, g_enroll_ctx->proc_buf, g_sensor83_grey_offset);
++        LOGD("-------------press detect texture   remove bkg image--count = %d, SIZE = %d",count, SIZE);
++        //记录第一次按下时间
++        clock_gettime(CLOCK_BOOTTIME, &g_check_end_time);
++        if(g_first_press_get_time){
++            g_check_time.tv_sec = g_check_end_time.tv_sec;
++            g_check_time.tv_nsec = g_check_end_time.tv_nsec;
++            g_first_press_get_time = 0;
++        }
++
++        if(g_auth_ctx->temp_count < count){
++            g_auth_ctx->temp_count = count;
++            memcpy(g_auth_ctx->temp_image, image_in, sizeof(g_auth_ctx->max_image));
++        }
++        s_press_times = (g_check_end_time.tv_sec - g_check_time.tv_sec) * 1000 + (g_check_end_time.tv_nsec - g_check_time.tv_nsec)/1000000;
++        if(s_press_times < 5000){
++            if(g_auth_ctx->max_count < g_auth_ctx->temp_count){
++                memcpy(g_auth_ctx->max_image, g_auth_ctx->temp_image,sizeof(g_auth_ctx->max_image));
++                g_auth_ctx->max_count = g_auth_ctx->temp_count;
++            }
++        }else{
++            g_check_time.tv_sec = g_check_end_time.tv_sec;
++            g_check_time.tv_nsec = g_check_end_time.tv_nsec;
++        }
++        LOGD("---- count = %d, temp_count = %d, max_count = %d, s_press_times = %ld",count,g_auth_ctx->temp_count,g_auth_ctx->max_count,s_press_times);
++        fp83_remove_bkg(g_auth_ctx->max_image, context_get_sensor83_bkg(),
++                g_auth_ctx->remove_bkg_img, g_enroll_ctx->proc_buf, g_sensor83_grey_offset);
++
+ 		if ((count - g_enroll_ctx->max_count) > (SIZE - g_enroll_ctx->max_count) / 10) {
+ 			memcpy(g_enroll_ctx->max_image, image_in, sizeof(g_enroll_ctx->max_image));
+ 			g_enroll_ctx->max_count = count;
+@@ -391,6 +425,15 @@ static int algorithm83_press_detect_texture(void *image, int type) {
+ 	    s_cnt_img = 0;
+ 	}
+ 
++    if(ret == NORMAL_UNPRESSED){
++        LOGD("-------------unpress memset ------");
++        g_auth_ctx->max_count  = 0;
++        g_auth_ctx->temp_count  = 0;
++        g_auth_ready = 0;
++        g_first_press_get_time = 1;
++        memset(g_auth_ctx->max_image, 0, sizeof(g_auth_ctx->max_image));
++        memset(g_auth_ctx->temp_image, 0, sizeof(g_auth_ctx->max_image));
++    }
+ 	LOGD("count=%d ratio=%d, ret=%d grey offset=0x%x\n", count, sratio, ret, g_sensor83_grey_offset);
+ 
+ 
+@@ -465,7 +508,7 @@ static int algorithm83_check_press(void *image, int *press_ok)
+ 
+ 
+ static void match_save_bmp(int val, int char_num) {
+-#ifdef SAVE83_FILE
++//#ifdef SAVE83_FILE
+ 	extern unsigned char *g_image_buffer;
+ 	char name[128];
+ 
+@@ -496,7 +539,7 @@ static void match_save_bmp(int val, int char_num) {
+ 		num = 0;
+ 		LOGD("reset num");
+ 	}
+-#endif
++//#endif
+ }
+ 
+ static int do_match_result(int snum, int score, int area, int tempn) {
+@@ -542,12 +585,20 @@ static int algorithm83_authenticate(int *fid_count, uint32_t *fid) {
+ 	uint32_t fidlist[FINGERPRINT_SIZE];
+ 	int *tmp_data = g_enroll_ctx->tmp_template;
+ 	int *max_data = g_enroll_ctx->test_template_data;
+-
++    int count;
+ 	int isMult = 1, count_down = *fid_count;
++	count = fp83_press_detect(g_auth_ctx->remove_bkg_img, context_get_sensor83_bkg(), g_sensor83_grey_offset);
++    LOGD("---------authen count = %d",count);
+ 	char_num = alg83_extract(g_auth_ctx->remove_bkg_img);
+ 	if(char_num == 0) {
+ 	    LOGE("extract character fail.");
+ 	}
++	char name[128];
++	static int num = 0;
++    sprintf(name, "/data/system/users/0/fpdata/match_remove_bkg_%.3d.bmp", num);
++    save_bmp_file(name, g_auth_ctx->remove_bkg_img, IMAGE_W, IMAGE_H);
++    num++;
++
+ 	policy_enumerate_fingerid(fidlist, &pre_len);
+ 	*fid_count = pre_len;
+ match_again:
+@@ -573,25 +624,20 @@ match_again:
+ 		}
+ 	}
+ 
++	match_save_bmp(ret, char_num);
+ 	if (ret != 0) {
+ 		LOGD("score=%d, char_num=%d, matchArea=%d score_th=%d, temp_idx=%d, temp_num=%d ratio=%d isMult=%d\n",
+ 			last_score, char_num, last_area, g_config.auth_score, last_temp_idx, last_temp_num, sratio, isMult);
+-		match_save_bmp(ret, char_num);
+ 		LOGD("match successfully.");
++        if (do_match_update(char_num, last_score, last_area, last_temp_num)) { //更新模板
++            policy_update_template_data(fidlist[last_len], max_data);
++            LOGD("update template.\n");
++        }
+ 	} else {
+-		if (isMult == 1) {
+-			isMult = 0;
+-			goto match_again;
+-		} else if(count_down==0) { //最后一次尝试失败打印
+-			match_save_bmp(ret, char_num);
+-			LOGD("score=%d, char_num=%d, matchArea=%d score_th=%d, ratio=%d\n",
+-				score, char_num, area, g_config.auth_score, sratio);
+-			LOGD("match failed.");
+-		}
+-	}
+-	if (do_match_update(char_num, last_score, last_area, last_temp_num)) { //更新模板
+-		policy_update_template_data(fidlist[last_len], max_data);
+-		LOGD("update template.\n");
++        //match_save_bmp(ret, char_num);
++        LOGD("score=%d, char_num=%d, matchArea=%d score_th=%d, ratio=%d\n",
++                score, char_num, area, g_config.auth_score, sratio);
++        LOGD("match failed.");
+ 	}
+ 	memset(max_data, 0, sizeof(g_enroll_ctx->test_template_data));
+ 
+@@ -615,7 +661,7 @@ static int algorithm83_enroll_start(uint64_t user_id) {
+ }
+ 
+ static void enroll_save_bmp(int val) {
+-#ifdef SAVE83_FILE
++//#ifdef SAVE83_FILE
+ 	char name[128];
+ 	static int num = 0;
+ 
+@@ -645,7 +691,7 @@ static void enroll_save_bmp(int val) {
+ 		LOGD("reset num");
+ 	}
+ 
+-#endif
++//#endif
+ }
+ 
+ /* 注册

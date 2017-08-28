@@ -1,0 +1,884 @@
+diff --git a/fingerprint/client/fingerprintso/Android.mk b/fingerprint/client/fingerprintso/Android.mk
+index 64d3fc7..9362b9c 100644
+--- a/fingerprint/client/fingerprintso/Android.mk
++++ b/fingerprint/client/fingerprintso/Android.mk
+@@ -16,11 +16,19 @@ LOCAL_PATH := $(call my-dir)
+ 
+ include $(CLEAR_VARS)
+ 
++ifeq ($(OPERATION_SYSTEM), Android5.1)
++LOCAL_MODULE := mafprint
++else
+ LOCAL_MODULE := fingerprint.default
++endif
+ 
+ LOCAL_MODULE_RELATIVE_PATH := hw
+ 
++ifeq ($(OPERATION_SYSTEM), Android5.1)
++LOCAL_SRC_FILES := ma_release_Jnifp.c
++else
+ LOCAL_SRC_FILES := fingerprint.c
++endif
+ 
+ LOCAL_C_INCLUDES := $(COMMON_INCLUDE)
+ 
+diff --git a/fingerprint/client/fingerprintso/ma_release_Jnifp.c b/fingerprint/client/fingerprintso/ma_release_Jnifp.c
+new file mode 100644
+index 0000000..cea650a
+--- /dev/null
++++ b/fingerprint/client/fingerprintso/ma_release_Jnifp.c
+@@ -0,0 +1,308 @@
++#include "ma_release_Jnifp.h"
++#include<stdlib.h>
++#include<pthread.h>
++#include<android/log.h>
++#include <stdio.h>
++#include "../utils/notifyplatform51.h"
++#include "config.h"
++#include "../libfprint/interface/ca_interface.h"
++#include "hw_auth_token.h"
++
++pthread_t thread;
++JavaVM *m_vm;
++
++jclass objclass;
++jclass fingerCls;
++jmethodID fingerId;
++jmethodID mid;
++jobject mobj;
++jobject mFprint;
++jobject globalFprint;
++
++jfieldID msgFid;
++jfieldID fidFid;
++jfieldID resultFid;
++jfieldID ecodeFid;
++
++static int notify(fingerprint_t *fp);
++
++//初始化的时候会调进来一次，在这个方法里持有jvm的引用
++JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM *vm, void *reserved){
++	LOGD(" start ");
++    m_vm=vm;
++    JNIEnv* env = NULL;
++    jint result = -1;
++    if(m_vm){
++    	LOGD("m_vm init success\n");
++    }else{
++    	LOGD("m_vm init failed\n");
++    }
++    if ((*vm)->GetEnv(vm, (void**)&env, JNI_VERSION_1_4) != JNI_OK){
++        return result;
++    }
++    LOGD(" end \n");
++    return JNI_VERSION_1_4;
++}
++
++JNIEXPORT void JNICALL JNI_OnUnload(JavaVM* vm, void* reserved) {
++
++}
++
++JNIEnv* getJNIEnv(int* needsDetach){
++	LOGD("start \n");
++    JNIEnv* env = NULL;
++    jint result = -1;
++    *needsDetach = 0;
++    if ((*m_vm)->GetEnv(m_vm, (void**) &env, JNI_VERSION_1_4) != JNI_OK){
++        int status = (*m_vm)->AttachCurrentThread(m_vm, &env, 0);
++        if (status < 0){
++        	 LOGD("failed to attach current thread \n");
++            return NULL;
++        }
++        *needsDetach = 1;
++    }
++    LOGD("=end=\n");
++    return env;
++}
++
++/*
++ * 实现回调
++ */
++void callbackMethod(fingerprint_t *fp){
++
++	LOGD("start \n");
++    int needsDetach = 0;
++    JNIEnv *env=getJNIEnv(&needsDetach);
++
++	(*env)->SetIntField(env, globalFprint, msgFid, fp->msg);
++	(*env)->SetIntField(env, globalFprint, fidFid, fp->fid);
++	(*env)->SetIntField(env, globalFprint, resultFid, fp->result);
++	(*env)->SetIntField(env, globalFprint, ecodeFid, fp->ecode);
++	(*env)->CallVoidMethod(env, mobj, mid, globalFprint);
++
++	jthrowable exception = (*env)->ExceptionOccurred(env);
++	if (exception) {
++		(*env)->ExceptionDescribe(env);
++	}
++
++    if(needsDetach){
++        (*m_vm)->DetachCurrentThread(m_vm);
++        //(*env)->DeleteLocalRef(env,jstr);
++    }
++    LOGD("=end=\n");
++}
++
++/*
++ * Class:     com_android_ma_JNIFprint
++ * Method:    start
++ * Signature: ()V
++ */
++JNIEXPORT void JNICALL Java_ma_release_Jnifp_setNotify
++(JNIEnv * env, jobject jobject1){
++	LOGD("start \n");
++
++    objclass = (*env)->FindClass(env, "ma/release/Jnifp");
++    fingerCls = (*env)->FindClass(env,"ma/release/Fingerprint");
++    if ((*env)->ExceptionCheck(env)) {
++       return;
++    }
++    mid = (*env)->GetMethodID(env, objclass, "callback", "(Lma/release/Fingerprint;)V");
++    if ((*env)->ExceptionCheck(env)) {
++       return ;
++    }
++    fingerId = (*env)->GetMethodID(env,fingerCls,"<init>" ,"()V");
++    if ((*env)->ExceptionCheck(env)) {
++       return;
++    }
++
++    msgFid = (*env)->GetFieldID(env, fingerCls, "msg", "I");
++    fidFid = (*env)->GetFieldID(env, fingerCls, "fid", "I");
++    resultFid = (*env)->GetFieldID(env, fingerCls, "result", "I");
++    ecodeFid = (*env)->GetFieldID(env, fingerCls, "ecode", "I");
++
++    mobj=(*env)->NewGlobalRef(env, jobject1);
++    mFprint = (*env)->NewObject(env,fingerCls,fingerId);
++    globalFprint = (*env)->NewGlobalRef(env,mFprint);
++
++    LOGD("end \n");
++}
++
++static int notify(fingerprint_t *fp) {
++	LOGD("start \n");
++    int ret=0;
++    LOGD("fid = %d , msg=%d， result==%d, ecode = %d\n",fp->fid, fp->msg,fp->result, fp->ecode);
++    callbackMethod(fp);
++    LOGD("end \n");
++    return ret;
++}
++
++/*
++ * Class:     ma_release_Jnifp
++ * Method:    open
++ * Signature: (Ljava/lang/String;)I
++ */
++JNIEXPORT jint JNICALL Java_ma_release_Jnifp_open
++  (JNIEnv * env, jclass cls , jstring path){
++
++	LOGD("start \n");
++	int ret =0, val;
++	jboolean bIsCopy;
++	const char *fpath;
++
++    fpath = (*env)->GetStringUTFChars(env, path, &bIsCopy);
++    bio_init();
++    bio_set_active_group(0, fpath);
++    (*env)->ReleaseStringUTFChars(env, path, fpath);
++    set_notify(notify); //通知函数
++    ret = ma_tac_calibrate(); //添加校准,解决重启失效问题
++	LOGD("end \n");
++	return ret;
++}
++
++/*
++ * Class:     ma_release_Jnifp
++ * Method:    close
++ * Signature: ()I
++ */
++JNIEXPORT jint JNICALL Java_ma_release_Jnifp_close
++  (JNIEnv *env, jclass cls){
++	LOGD("start \n");
++	(*env)->DeleteGlobalRef(env,mobj);
++	int ret = 0;
++    bio_close();
++	LOGD("end \n");
++	return ret;
++}
++
++/*
++ * Class:     ma_release_Jnifp
++ * Method:    preEnroll
++ * Signature: ()I
++ */
++JNIEXPORT jint JNICALL Java_ma_release_Jnifp_preEnroll
++  (JNIEnv *env, jclass cls){
++	LOGD(" start \n");
++	int ret = 0;
++    ret = bio_pre_enroll();
++	LOGD(" end \n");
++	return ret;
++}
++
++/*
++ * Class:     ma_release_Jnifp
++ * Method:    enroll
++ * Signature: ()I
++ */
++JNIEXPORT jint JNICALL Java_ma_release_Jnifp_enroll
++  (JNIEnv *env, jclass cls){
++	LOGD("start \n");
++	int ret = 0;
++    hw_auth_token_t hat;
++    ret =  bio_enroll(0,0,&hat);
++	LOGD("end \n");
++	return ret;
++}
++
++/*
++ * Class:     ma_release_Jnifp
++ * Method:    postEnroll
++ * Signature: ()I
++ */
++JNIEXPORT jint JNICALL Java_ma_release_Jnifp_postEnroll
++  (JNIEnv *env, jclass cls){
++	LOGD("start \n");
++	int ret = 0;
++    ret = bio_post_enroll();
++    ret = bio_cancel();
++	LOGD("end \n");
++	return ret;
++}
++
++/*
++ * Class:     ma_release_Jnifp
++ * Method:    authenticate
++ * Signature: ()I
++ */
++JNIEXPORT jint JNICALL Java_ma_release_Jnifp_authenticate
++  (JNIEnv *env, jclass cls){
++	LOGD("start \n");
++	int ret = 0;
++    ret = bio_authenticate(0,0);
++	LOGD("end \n");
++	return ret;
++}
++
++/*
++ * Class:     ma_release_Jnifp
++ * Method:    stopAuthenticate
++ * Signature: ()I
++ */
++JNIEXPORT jint JNICALL Java_ma_release_Jnifp_stopAuthenticate
++  (JNIEnv *env, jclass cls){
++	LOGD("start \n");
++	int ret = 0;
++    ret = bio_cancel();
++	LOGD("end \n");
++	return ret;
++}
++
++/*
++ * Class:     ma_release_Jnifp
++ * Method:    enumerate
++ * Signature: ([BI)I
++ */
++JNIEXPORT jint JNICALL Java_ma_release_Jnifp_enumerate
++  (JNIEnv *env, jclass cls, jintArray arr, jint len){
++	LOGD("start \n");
++	int ret = 0 , i = 0;
++	uint32_t buf[len];
++    uint32_t gids[len];
++    bio_enumerate(gids, buf, &len);
++    for(i =0;i<len;i++){
++        LOGD("buf[%d]= %d",i, buf[i]);
++    }
++    (*env)->SetIntArrayRegion(env, arr, 0, len, (const jint*)buf);
++	LOGD("end \n");
++	return ret;
++}
++
++/*
++ * Class:     ma_release_Jnifp
++ * Method:    remove
++ * Signature: (I)I
++ */
++JNIEXPORT jint JNICALL Java_ma_release_Jnifp_remove
++  (JNIEnv *env, jclass cls, jint fid){
++	LOGD(" start ");
++	int ret = 0;
++    ret = bio_remove(0, fid);
++	LOGD("end \n");
++	return ret;
++}
++
++/*
++ * Class:     ma_release_jnifp
++ * Method:    calibrate
++ * Signature: ()I
++ */
++JNIEXPORT jint JNICALL Java_ma_release_Jnifp_calibrate(JNIEnv *env, jclass cls){
++    LOGD("start");
++    int ret = 0;
++    ret = ma_tac_calibrate();
++    return ret;
++    LOGD("end");
++}
++
++/*
++ * Class:     ma_release_jnifp
++ * Method:    calibrate
++ * Signature: ()I
++ */
++ JNIEXPORT jint JNICALL Java_ma_release_Jnifp_testSPI
++(JNIEnv *env, jclass cls){
++    LOGD("start");
++    int ret = 0;
++    ret = ma_tac_spi_test();
++    return ret;
++    LOGD("end");
++}
+diff --git a/fingerprint/client/fingerprintso/ma_release_Jnifp.h b/fingerprint/client/fingerprintso/ma_release_Jnifp.h
+new file mode 100644
+index 0000000..405a6c1
+--- /dev/null
++++ b/fingerprint/client/fingerprintso/ma_release_Jnifp.h
+@@ -0,0 +1,109 @@
++/* DO NOT EDIT THIS FILE - it is machine generated */
++#include <jni.h>
++/* Header for class ma_release_Jnifp */
++
++#ifndef _Included_ma_release_Jnifp
++#define _Included_ma_release_Jnifp
++#ifdef __cplusplus
++extern "C" {
++#endif
++/*
++ * Class:     ma_release_Jnifp
++ * Method:    start
++ * Signature: ()V
++ */
++JNIEXPORT void JNICALL Java_ma_release_Jnifp_setNotify
++  (JNIEnv *, jobject);
++
++/*
++ * Class:     ma_release_Jnifp
++ * Method:    open
++ * Signature: (Ljava/lang/String;)I
++ */
++JNIEXPORT jint JNICALL Java_ma_release_Jnifp_open
++  (JNIEnv *, jclass, jstring);
++
++/*
++ * Class:     ma_release_Jnifp
++ * Method:    close
++ * Signature: ()I
++ */
++JNIEXPORT jint JNICALL Java_ma_release_Jnifp_close
++  (JNIEnv *, jclass);
++
++
++/*
++ * Class:     ma_release_Jnifp
++ * Method:    preEnroll
++ * Signature: ()I
++ */
++JNIEXPORT jint JNICALL Java_ma_release_Jnifp_preEnroll
++  (JNIEnv *, jclass);
++
++/*
++ * Class:     ma_release_Jnifp
++ * Method:    enroll
++ * Signature: ()I
++ */
++JNIEXPORT jint JNICALL Java_ma_release_Jnifp_enroll
++  (JNIEnv *, jclass);
++
++/*
++ * Class:     ma_release_Jnifp
++ * Method:    postEnroll
++ * Signature: ()I
++ */
++JNIEXPORT jint JNICALL Java_ma_release_Jnifp_postEnroll
++  (JNIEnv *, jclass);
++
++/*
++ * Class:     ma_release_Jnifp
++ * Method:    authenticate
++ * Signature: ()I
++ */
++JNIEXPORT jint JNICALL Java_ma_release_Jnifp_authenticate
++  (JNIEnv *, jclass);
++
++/*
++ * Class:     ma_release_Jnifp
++ * Method:    stopAuthenticate
++ * Signature: ()I
++ */
++JNIEXPORT jint JNICALL Java_ma_release_Jnifp_stopAuthenticate
++  (JNIEnv *, jclass);
++
++/*
++ * Class:     ma_release_Jnifp
++ * Method:    enumerate
++ * Signature: ([BI)I
++ */
++JNIEXPORT jint JNICALL Java_ma_release_Jnifp_enumerate
++  (JNIEnv *, jclass, jbyteArray, jint);
++
++/*
++ * Class:     ma_release_Jnifp
++ * Method:    remove
++ * Signature: (I)I
++ */
++JNIEXPORT jint JNICALL Java_ma_release_Jnifp_remove
++  (JNIEnv *, jclass, jint);
++
++/*
++ * Class:     ma_release_Jnifp
++ * Method:    calibrate
++ * Signature: ()I
++ */
++JNIEXPORT jint JNICALL Java_ma_release_Jnifp_calibrate
++  (JNIEnv *, jclass);
++
++/*
++ * Class:     ma_release_Jnifp
++ * Method:    testSPI
++ * Signature: ()I
++ */
++JNIEXPORT jint JNICALL Java_ma_release_Jnifp_testSPI
++  (JNIEnv *, jclass);
++#ifdef __cplusplus
++}
++#endif
++#endif
+diff --git a/fingerprint/client/libfprint/Android.mk b/fingerprint/client/libfprint/Android.mk
+index 88ede77..736978f 100644
+--- a/fingerprint/client/libfprint/Android.mk
++++ b/fingerprint/client/libfprint/Android.mk
+@@ -16,7 +16,6 @@ LOCAL_STATIC_LIBRARIES :=
+ 
+ ifeq ($(OPERATION_SYSTEM), Ali5.1)
+ 
+-
+ LOCAL_SRC_FILES += \
+ 	interface/ali_interface.c 
+ else
+@@ -32,12 +31,15 @@ LOCAL_SRC_FILES += \
+ 	jni/fingerprint_factorymode.c \
+ 	tac/microarray_tac.c \
+ 	utils/bitmap.c \
+-	utils/notify.c \
+ 	utils/ma_utils.c \
+ 	utils/aes.c \
+ 	utils/properties_context.c
+ endif
+-
++ifeq ($(OPERATION_SYSTEM),Android5.1)
++LOCAL_SRC_FILES+=utils/notifyplatform51.c
++else
++LOCAL_SRC_FILES+=utils/notify.c
++endif
+ 
+ ifeq ($(PLATFORM), Android)
+ LOCAL_SRC_FILES += tac/default_tac.c
+diff --git a/fingerprint/client/libfprint/drivercontroller/driver_controller.c b/fingerprint/client/libfprint/drivercontroller/driver_controller.c
+index 7d2d3aa..81763c7 100644
+--- a/fingerprint/client/libfprint/drivercontroller/driver_controller.c
++++ b/fingerprint/client/libfprint/drivercontroller/driver_controller.c
+@@ -10,6 +10,7 @@
+ 
+ #ifndef BUILD_JNI
+ #include "../utils/notify.h"
++#include "../utils/notifyplatform51.h"
+ #endif
+ 
+ static int g_device_fd = -1;
+diff --git a/fingerprint/client/libfprint/interface/ca_interface.c b/fingerprint/client/libfprint/interface/ca_interface.c
+index cf31713..9d11c9e 100644
+--- a/fingerprint/client/libfprint/interface/ca_interface.c
++++ b/fingerprint/client/libfprint/interface/ca_interface.c
+@@ -11,6 +11,7 @@
+ #include "process/process_extern_msg.h"
+ #include "config.h"
+ #include "../utils/notify.h"
++#include "../utils/notifyplatform51.h"
+ #include "../utils/ma_utils.h"
+ #include "../drivercontroller/driver_controller.h"
+ #include "../tac/communicate_tube.h"
+@@ -250,7 +251,11 @@ int bio_init(void)
+     start_process();
+     start_process_extern_msg();
+     LOGD("set default active group.");
+-    bio_set_active_group(DEFAULT_USER_GROUP, DEFAULT_STORAGE_PATH);
++    if(strcmp(OPERATION_SYSTEM,"Android5.1")==0){
++        LOGD("this system version is Android5.1 \n");
++    }else{
++        bio_set_active_group(DEFAULT_USER_GROUP, DEFAULT_STORAGE_PATH);
++    }
+ 
+     ma_tac_get_energy();//get bkg for factory test get image.
+     refresh_interrupt_parameters_timer();
+diff --git a/fingerprint/client/libfprint/interface/ca_interface.h b/fingerprint/client/libfprint/interface/ca_interface.h
+index a9d9147..389ef65 100644
+--- a/fingerprint/client/libfprint/interface/ca_interface.h
++++ b/fingerprint/client/libfprint/interface/ca_interface.h
+@@ -15,5 +15,6 @@ int bio_remove(uint32_t gid,uint32_t fid);
+ int bio_set_active_group(uint32_t gid,const char *store_path);
+ int bio_authenticate(uint64_t operation_id,uint32_t gid);
+ int bio_init();
++int bio_enumerate(uint32_t gids[], uint32_t fids[], int *fid_count) ;
+ 
+ #endif
+diff --git a/fingerprint/client/libfprint/process/authenticate.c b/fingerprint/client/libfprint/process/authenticate.c
+index c99c08a..db3e2e4 100644
+--- a/fingerprint/client/libfprint/process/authenticate.c
++++ b/fingerprint/client/libfprint/process/authenticate.c
+@@ -5,6 +5,7 @@
+ #include "authenticate.h"
+ #include "config.h"
+ #include "../utils/notify.h"
++#include "../utils/notifyplatform51.h"
+ #include "../drivercontroller/driver_controller.h"
+ #include "../tac/communicate_tube.h"
+ 
+diff --git a/fingerprint/client/libfprint/process/enroll.c b/fingerprint/client/libfprint/process/enroll.c
+index 7e56c96..57e35cb 100644
+--- a/fingerprint/client/libfprint/process/enroll.c
++++ b/fingerprint/client/libfprint/process/enroll.c
+@@ -7,6 +7,7 @@
+ #include "enroll.h"
+ #include "config.h"
+ #include "../utils/notify.h"
++#include "../utils/notifyplatform51.h"
+ #include "../drivercontroller/driver_controller.h"
+ #include "../tac/communicate_tube.h"
+ 
+diff --git a/fingerprint/client/libfprint/process/enrollcalibrate.c b/fingerprint/client/libfprint/process/enrollcalibrate.c
+index 46b60f7..03d41be 100644
+--- a/fingerprint/client/libfprint/process/enrollcalibrate.c
++++ b/fingerprint/client/libfprint/process/enrollcalibrate.c
+@@ -3,11 +3,14 @@
+ #include "enrollcalibrate.h"
+ #include "config.h"
+ #include "../utils/notify.h"
++#include "../utils/notifyplatform51.h"
+ #include "../drivercontroller/driver_controller.h"
+ #include "../tac/communicate_tube.h"
+ 
+ int gMinEnergy = 0x7fffffff;
+ 
++int enroll_downflag = 0;
++int enroll_upflag = 1;
+ /*执行注册校准工作
+  * @qe 任务队列元素
+  * @return
+@@ -50,6 +53,13 @@ void* enrollcalibrate_work(void * q)
+         // has finger
+         if (!cancelflag && down) {
+             // enroll
++            if(strcmp(OPERATION_SYSTEM,"Android5.1")==0){
++                if(enroll_upflag == 1 && enroll_downflag ==0){
++                    LOGD("enroll notify finger down\n");
++                    acquired_event_notify(FINGERPRINT_ACQUIRED_FINGER_DOWN);
++                    enroll_downflag =1;
++                }
++            }
+             if ( !cancelflag ) {
+                 if(presscount > 0) {
+                     LOGD(" too fast");
+@@ -121,6 +131,14 @@ void* enrollcalibrate_work(void * q)
+                 }
+                 presscount--;
+             }
++            if(strcmp(OPERATION_SYSTEM,"Android5.1")==0){
++                if(enroll_downflag == 1){
++                    LOGD(" enroll notify finger up \n");
++                    acquired_event_notify(FINGERPRINT_ACQUIRED_FINGER_UP);
++                    enroll_downflag = 0;
++                    enroll_upflag = 1;
++                }
++            }
+         }
+         //has finger
+         LOGD("###down %d percentage %d gMinEnergy %d\n",down , percentage, gMinEnergy);
+diff --git a/fingerprint/client/libfprint/utils/notifyplatform51.c b/fingerprint/client/libfprint/utils/notifyplatform51.c
+new file mode 100644
+index 0000000..06fa07c
+--- /dev/null
++++ b/fingerprint/client/libfprint/utils/notifyplatform51.c
+@@ -0,0 +1,130 @@
++/*
++ * notify.c
++ *
++ *  Created on: 2016-8-29
++ *      Author: zhl
++ */
++
++#define LOG_TAG "MICROARRAY Notify"
++#include <cutils/log.h>
++
++#include <hardware/hardware.h>
++#include <hardware/fingerprint.h>
++
++#include <tee_client_api.h>
++
++#include "globalvar.h"
++#include "../drivercontroller/driver_controller.h"
++#include "../tac/communicate_tube.h"
++
++#include "notifyplatform51.h"
++notify_t gNotify;//消息通知方法
++
++/*记录消息通知方法
++ * @notify 消息通知方法
++ */
++void set_notify(notify_t notify)
++{
++	gNotify = notify;
++}
++
++void error_notify(uint32_t errornumber)
++{
++}
++
++void remove_notify(uint32_t gid, uint32_t fid)
++{
++    fingerprint_t fp = {
++        .msg = MSG_REMOVE,
++        .fid = 0,
++        .result = fid,
++        .ecode = 0,
++    };
++
++    gNotify(&fp);
++}
++
++/*注册结果通知
++ * @fid 注册的指纹号
++ * @remaining 剩余百分比
++ * @msg 提示信息
++ */
++void enroll_notify(int gid, uint32_t fid, int remaining, int msg)
++{
++    LOGD(" start enroll notify fid =%d, remaining = %d , msg = %d ", fid, remaining, msg);
++    fingerprint_t fp;
++    fp.msg = MSG_ENROLL;
++    fp.fid = fid;
++    fp.result = remaining;
++    fp.ecode = 0;
++
++
++	gNotify(&fp);
++
++}
++
++/*验证结果通知
++ * @gid group id
++ * @fid 注册的指纹号
++ * @token Data format for an authentication record used to prove successful authentication.
++ */
++void authenticate_notify(uint32_t gid,  uint32_t fid, hw_auth_token_t *token)
++{
++    LOGE("start fid = %d",fid);
++    fingerprint_t fp = {
++        .msg = MSG_MATCH,
++        .fid = 0,
++        .result = fid,
++        .ecode = 0,
++    };
++
++    if(fid !=0){
++        fp.ecode = 0;
++    }else{
++        fp.ecode = -2;
++    }
++	gNotify(&fp);
++
++	LOGE("end\n");
++}
++
++/*notify fingerprint with event, e.g. duplicate area, duplicate finger
++ * @event: message for fingerprint
++ */
++void acquired_event_notify(uint32_t event)
++{
++    fingerprint_t fp;
++    LOGD("start event = %d \n", event);
++    fp.fid = 0;
++    fp.result = 0;
++
++    switch(event){
++        case FINGERPRINT_ACQUIRED_DUPLICATE_AREA:
++            fp.msg = MSG_ENROLL ;
++            fp.ecode = FP_DUPLI_AREA;
++
++            break;
++        case FINGERPRINT_ACQUIRED_DUPLICATE_FINGER:
++            fp.msg = MSG_ENROLL ;
++            fp.ecode = FP_DUPLI_FINGER;
++
++            break;
++        case FINGERPRINT_ACQUIRED_LOW_COVER:
++            fp.msg = MSG_ENROLL ;
++            fp.ecode = FP_CHK_PART;
++
++            break;
++        case FINGERPRINT_ACQUIRED_FINGER_DOWN:
++            fp.msg = MSG_ENROLL;
++            fp.ecode = FP_CHK_FULL;
++            break;
++        case FINGERPRINT_ACQUIRED_FINGER_UP:
++            fp.msg = MSG_ENROLL;
++            fp.ecode = FP_CHK_UP;
++            break;
++    }
++    LOGD("==msg = %d, fid = %d, result = %d, ecode = %d \n",fp.msg, fp.fid, fp.result, fp.ecode);
++	gNotify(&fp);
++	LOGE("end\n");
++}
++
+diff --git a/fingerprint/client/libfprint/utils/notifyplatform51.h b/fingerprint/client/libfprint/utils/notifyplatform51.h
+new file mode 100644
+index 0000000..7be92d3
+--- /dev/null
++++ b/fingerprint/client/libfprint/utils/notifyplatform51.h
+@@ -0,0 +1,48 @@
++/*
++ * notify.h
++ *
++ *  Created on: 2016-8-29
++ *      Author: zhl
++ */
++
++#ifndef NOTIFY_H_
++#define NOTIFY_H_
++
++#include <hardware/fingerprint.h>
++
++#define FP_CHK_PART           2     //部分接触
++#define FP_DUPLI_AREA      -40      //重复区域
++#define FP_DUPLI_FINGER    -41      //重复手指
++#define FP_CHK_DOWN         1       //手指按下
++#define FP_CHK_FULL         3       //全覆盖
++#define FP_CHK_UP           5       //手指抬起
++
++enum msg_type {
++    MSG_IDLE = 0,
++    MSG_ENROLL,
++    MSG_MATCH,
++    MSG_REMOVE,
++    MSG_CALIBRATE,
++    MSG_TEST_START,
++    MSG_TEST_STOP,
++};
++
++typedef struct fingerprint {
++     int msg;
++     int fid;
++     int result;
++     int ecode;
++} fingerprint_t;
++
++typedef int(*notify_t)(fingerprint_t *fp);
++
++extern void set_notify(notify_t notify);
++
++void remove_notify(uint32_t gid, uint32_t fid);
++
++void enroll_notify(int gid, uint32_t fid, int remaining, int msg);
++
++void authenticate_notify(uint32_t gid,  uint32_t fid, hw_auth_token_t *token);
++
++void error_notify(uint32_t errornumber);
++#endif /* NOTIFY_H_ */
+diff --git a/fingerprint/include/hw_auth_token.h b/fingerprint/include/hw_auth_token.h
+new file mode 100644
+index 0000000..c4ddeb4
+--- /dev/null
++++ b/fingerprint/include/hw_auth_token.h
+@@ -0,0 +1,53 @@
++/*
++ * Copyright (C) 2014 The Android Open Source Project
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ * you may not use this file except in compliance with the License.
++ * You may obtain a copy of the License at
++ *
++ *      http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++
++#include <stdint.h>
++
++#ifndef ANDROID_HARDWARE_HW_AUTH_TOKEN_H
++#define ANDROID_HARDWARE_HW_AUTH_TOKEN_H
++
++#ifdef __cplusplus
++extern "C" {
++#endif  // __cplusplus
++
++extern const uint8_t HW_AUTH_TOKEN_VERSION;
++
++typedef enum {
++    HW_AUTH_NONE = 0,
++    HW_AUTH_PASSWORD = 1 << 0,
++    HW_AUTH_FINGERPRINT = 1 << 1,
++    // Additional entries should be powers of 2.
++    HW_AUTH_ANY = UINT32_MAX,
++} hw_authenticator_type_t;
++
++/**
++ * Data format for an authentication record used to prove successful authentication.
++ */
++typedef struct __attribute__((__packed__)) {
++    uint8_t version;  // Current version is 0
++    uint64_t challenge;
++    uint64_t user_id;             // secure user ID, not Android user ID
++    uint64_t authenticator_id;    // secure authenticator ID
++    uint32_t authenticator_type;  // hw_authenticator_type_t, in network order
++    uint64_t timestamp;           // in network order
++    uint8_t hmac[32];
++} hw_auth_token_t;
++
++#ifdef __cplusplus
++}  // extern "C"
++#endif  // __cplusplus
++
++#endif  // ANDROID_HARDWARE_HW_AUTH_TOKEN_H
+diff --git a/push.sh b/push.sh
+new file mode 100755
+index 0000000..c02d540
+--- /dev/null
++++ b/push.sh
+@@ -0,0 +1,14 @@
++#!/bin/sh
++
++adb root
++adb remount
++
++echo "push lib$1 for standard"
++adb push out/client/libs/armeabi/libfprint-x32.so /system/lib
++adb push out/client/libs/armeabi/libmafprint.so /system/lib
++adb push out/client/libs/armeabi/libma-fpservice.so /system/lib
++
++
++echo "adb reboot......"
++adb reboot
++
+diff --git a/version/test.csv b/version/test.csv
+index 6b208ee..6f8c0b5 100644
+--- a/version/test.csv
++++ b/version/test.csv
+@@ -12,6 +12,7 @@ Default,Android,4.0.00,A121_N,Watchtrust,x86_64,Android6.0,Yes,Yes,Yes,No,14,3
+ Default,Android,4.0.00,A121_N,Nutlet,arm64-v8a,Android6.0,Yes,Yes,Yes,No,14,3
+ Default,Android,4.0.00,A121_N,Microtrust,arm64-v8a,Android6.0,Yes,Yes,Yes,No,14,3
+ Default,Android,4.0.00,A83_N,Android,armeabi,Android6.0,Yes,Yes,Yes,No,14,3
++Default,Android,4.0.00,A83_N,Android,armeabi,Android5.1,Yes,Yes,Yes,No,14,3
+ Default,Android,4.0.00,A80_T,Android,armeabi,Android6.0,Yes,Yes,Yes,No,14,3
+ Default,Android,4.0.00,A80_T&A83_N,Android,armeabi,Android6.0,Yes,Yes,Yes,No,14,3
+ Default,Android,4.0.00,A121_N,Android,arm64-v8a,Ali5.1,Yes,Yes,Yes,No,14,3

@@ -1,0 +1,252 @@
+diff --git a/fingerprint/service/soft_sensor/sensor83/Android.mk b/fingerprint/service/soft_sensor/sensor83/Android.mk
+index b25383f..29042e7 100644
+--- a/fingerprint/service/soft_sensor/sensor83/Android.mk
++++ b/fingerprint/service/soft_sensor/sensor83/Android.mk
+@@ -11,6 +11,7 @@ LOCAL_SRC_FILES := \
+ 	sensor_83.c \
+ 	sensor_context.c \
+ 	sensor_wrapper.c \ 
++	sensor_judge_finger.c \
+ #	../../malib/utils/bitmap.c \
+ #	../../malib/pgm/pgm.c
+ 	
+diff --git a/fingerprint/service/soft_sensor/sensor83/sensor_judge_finger.c b/fingerprint/service/soft_sensor/sensor83/sensor_judge_finger.c
+new file mode 100644
+index 0000000..1e6152b
+--- /dev/null
++++ b/fingerprint/service/soft_sensor/sensor83/sensor_judge_finger.c
+@@ -0,0 +1,144 @@
++#include <stdlib.h>
++#include "sensor_wrapper.h"
++#include "algorithm/algorithm.h"
++#include "sensor_context.h"
++#include "sensor_83.h"
++#include "sensor83_config.h"
++#include <math.h>
++
++
++#define TH 1000
++
++int gradxy(char *impha,int width,int height)
++{
++    int i,j,per;
++	int num_pha = 0;
++	int value = 0;
++	double sum1 = 0,sum2 = 0;
++	double sum;
++	//计算覆盖率，不管是什么
++	for(i = 0;i < height;i++)
++        for(j = 0;j < width;j++)
++		{
++			value = 0;
++			if(impha[i*width+j] < 5)
++			{
++				value = (impha[i*width+j-1] > 5) + (impha[i*width+j+1] > 5) + (impha[(i+1)*width+j] > 5) + (impha[(i-1)*width+j] > 5);
++				if(value>2)
++				{
++					num_pha ++;
++				}
++			}
++			else num_pha ++;
++		}
++	per = 100*(double)num_pha/(width*height);
++	//无按压或按压面积很小
++	if( per < 10)
++	{
++		return 0;
++	}
++	//二值化
++	for(i = 0;i < height;i++)
++        for(j = 0;j < width;j++)
++		{
++			if(impha[i*width+j] < 140)
++				impha[i*width+j] = 0;
++			else
++				impha[i*width+j] = 255;
++		}
++	for(i = 1;i < height-1;i++)
++        for(j = 1;j < width-1;j++)
++		{
++			if( (impha[i*width+j] == 255) && (impha[i*width+j-1] == 0 && impha[i*width+j+1] == 0 
++				&& impha[(i-1)*width+j] == 0 && impha[(i+1)*width+j] == 0 && impha[(i+1)*width+j-1] == 0 && impha[(i+1)*width+j+1] == 0
++				&& impha[(i-1)*width+j-1] == 0 && impha[(i-1)*width+j+1] == 0) )
++				impha[i*width+j] = 0;
++		}
++
++	for(i = 0;i < height-1;i++)
++        for(j = 0;j < width-1;j++)
++		{
++			sum1 = sum1 + (abs(impha[i*width+j+1] - impha[i*width+j]));
++			sum2 = sum2	+ (abs(impha[(i+1)*width+j] - impha[i*width+j]));
++		}
++    sum = sqrt((double)sum1*sum1+sum2*sum2)/per;
++	if(sum>1000)
++	    return per;
++	else
++		return 0;
++}
++
++
++
++static void to_str(char *des, unsigned char *src, int slen) {
++     int i, len;
++ 
++     memset(des, 0, sizeof(des));
++     for(i=4; i<slen-4; i++) {
++         len = strlen(des);
++         if(i<slen-1) {
++             sprintf(des+len, "%.2x ", src[i]);
++         } else {
++             sprintf(des+len, "%.2x\n", src[i]);
++         }
++     }
++     len = strlen(des);
++     //LOGD("%s: slen=%d len=%d des:%s", __func__, slen, len, des);
++}
++
++
++int get_temp_txt(char *temp,int *src,int len){
++    union temp_int{
++        struct temp_dat{
++         unsigned char ori;
++         unsigned char freq;
++         unsigned char pha;
++         unsigned char amp;
++        }blk;
++        int num;
++    }dat;
++    int i,j,k;
++    unsigned char ori[len];
++    unsigned char freq[len];
++    unsigned char pha[len];
++    unsigned char amp[len];
++    
++    char buf[2048];
++    
++    for(i=0;i<len;i++){
++        dat.num=src[i];
++        ori[i]=dat.blk.ori;
++        freq[i]=dat.blk.freq;
++        pha[i]=dat.blk.pha;
++        amp[i]=dat.blk.amp;
++    }
++    
++    to_str(buf,ori,64);
++    for(i=0;i<40;i++){
++        to_str(buf,amp+64+i*40,40);
++    }
++    
++    
++    to_str(buf,freq,64);
++     for(i=0;i<40;i++){
++        to_str(buf,freq+64+i*40,40);
++    }
++    
++     to_str(buf,pha,64);
++
++    // remove high pre 10 end 10 left 4 right 4
++    k=0;
++    for(i=10; i<30; i++) {
++		for(j=4; j<36; j++) {
++			temp[k++] = pha[i*40+j+64];
++		}
++	}
++    
++    
++     to_str(buf,amp,64);
++     for(i=0;i<40;i++){
++        to_str(buf,amp+64+i*40,40);
++    }
++
++    return 0;
++}
+diff --git a/fingerprint/service/soft_sensor/sensor83/sensor_wrapper.c b/fingerprint/service/soft_sensor/sensor83/sensor_wrapper.c
+index 7843651..4a6ef85 100644
+--- a/fingerprint/service/soft_sensor/sensor83/sensor_wrapper.c
++++ b/fingerprint/service/soft_sensor/sensor83/sensor_wrapper.c
+@@ -42,6 +42,7 @@ typedef struct authenticate_context {
+ 
+ static uint32_t s_navi_result = NAVI_NONE;
+ static int s_img_temp[TEMPLATE_SIZE_A83];
++static unsigned char img_temp[TEMPLATE_SIZE_A83];
+ 
+ typedef struct navigation_context {
+     int bkg[IMAGE_SIZE];
+@@ -59,6 +60,9 @@ static int s_cnt_img = 0;
+ static int g_src_enroll_image[IMAGE_SIZE];
+ #endif
+ 
++extern int get_temp_txt(char *temp,int *src,int len);
++extern int gradxy(char *impha,int width,int height);
++static int sensor83_save_paras(void);
+ /*************************** PRIVATE FUNCTION ********************/
+ /* 获取产品码，如MA96等
+  * @product_id 产品码
+@@ -165,7 +169,18 @@ static int sensor83_create(microarray_properties_t *config) {
+ 	fp83_detect_mode();
+ 
+ 	LOGD("end.-------------------");
+-
++    //add fht 
++//     int* oribkg;
++//     int curbkg[IMAGE_SIZE];
++//     oribkg = context_get_sensor83_bkg();
++//     fp83_read_image(curbkg, IMAGE_SIZE, 1, 1);
++//     if(){
++//         fp83_calc_init_parameters();
++//         fp83_reset_interrupt_parameters();
++//         fp83_calc_interrupt_parameters();
++//         ret=sensor83_save_paras();
++//     }
++    //end fht
+ 	return ret;
+ }
+ 
+@@ -619,12 +634,17 @@ static int algorithm83_authenticate(int *fid_count, uint32_t *fid) {
+ 	if(char_num == 0) {
+ 	    LOGE("extract character fail.");
+ 	}
+-	if(is_texture(s_img_temp)==0) {
+-		LOGE("not found texture.");
+-		return ERROR_EXTRACT_FAIL;
+-	}
++
++    get_temp_txt(img_temp,s_img_temp,sizeof(img_temp));
++
++    if(gradxy(img_temp,32,20) == 0){
++        LOGD("not a finger");
++        return ERROR_EXTRACT_FAIL;
++    }else{
++        LOGD("is a finger");
++    }
+ #ifdef SAVE83_FILE
+-	{
++    {
+ 		static int num =0;
+ 		char name[128];
+ 		sprintf(name, "/data/system/users/0/fpdata/temp%.3d_ch%.2d.txt", num, char_num);
+@@ -659,14 +679,14 @@ match_again:
+ 	if (ret != 0) {
+ 		LOGD("score=%d, char_num=%d, matchArea=%d score_th=%d, temp_idx=%d, temp_num=%d ratio=%d isMult=%d\n",
+ 			last_score, char_num, last_area, g_config.auth_score, last_temp_idx, last_temp_num, sratio, isMult);
+-		match_save_bmp(ret, char_num);
++        match_save_bmp(ret, char_num);
+ 		LOGD("match successfully.");
+ 	} else {
+ 		if (isMult == 1) {
+ 			isMult = 0;
+ 			goto match_again;
+ 		} else if(count_down==0) { //最后一次尝试失败打印
+-			match_save_bmp(ret, char_num);
++            match_save_bmp(ret, char_num);
+ 			LOGD("score=%d, char_num=%d, matchArea=%d score_th=%d, ratio=%d\n",
+ 				score, char_num, area, g_config.auth_score, sratio);
+ 			LOGD("match failed.");
+@@ -678,6 +698,7 @@ match_again:
+ 	}
+ 
+ 	*fid = ret;
++    LOGD("end");
+ 	return SUCCESS;
+ }
+ 

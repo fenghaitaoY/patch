@@ -1,0 +1,714 @@
+diff --git a/fingerprint/client/libfprint/process/authenticate.c b/fingerprint/client/libfprint/process/authenticate.c
+index 43abd67..5f64694 100644
+--- a/fingerprint/client/libfprint/process/authenticate.c
++++ b/fingerprint/client/libfprint/process/authenticate.c
+@@ -85,6 +85,10 @@ static int verify(struct cmd_entry *qe)
+ 
+ 	while (1) {
+ 		//not check cancel flag, when checking leave
++        if ( qe->cancelled ) {
++            LOGD("command cancelled\n");
++            return 0;
++        }
+ 	    down = ma_tac_detectTouch_getEnergy();
+ 	    if(down < 0) {
+ 	        error_notify(FINGERPRINT_ERROR_HW_UNAVAILABLE);
+diff --git a/fingerprint/include/config.h b/fingerprint/include/config.h
+index 35d3924..6547fc2 100644
+--- a/fingerprint/include/config.h
++++ b/fingerprint/include/config.h
+@@ -49,7 +49,7 @@ enum navigation_result {
+ //#define TEMPLATE_SIZE 3664
+ #define DEFAULT_ENERGY_THRESHOLD_A121                    200
+ #define DEFAULT_DETECT_THRESHOLD_A121                    128
+-#define DEFAULT_AUTHENTICATE_SCORE_A121                  75
++#define DEFAULT_AUTHENTICATE_SCORE_A121                  60
+ #define DEFAULT_AUTHENTICATE_LEVEL_A121                  4
+ #define DEFAULT_AUTHENTICATE_CHARACTERISTIC_NUM_A121     1
+ #endif
+diff --git a/fingerprint/service/soft_sensor/sensor121/Android.mk b/fingerprint/service/soft_sensor/sensor121/Android.mk
+index 1e7448c..9b6ee5f 100644
+--- a/fingerprint/service/soft_sensor/sensor121/Android.mk
++++ b/fingerprint/service/soft_sensor/sensor121/Android.mk
+@@ -11,7 +11,10 @@ LOCAL_SRC_FILES := \
+ 	algorithm/parttouch.c \
+ 	sensor_121.c \
+ 	sensor_context.c \
+-	sensor_wrapper.c 
++	sensor_wrapper.c \
++	algorithm/check_water.c \
++#	../../malib/utils/bitmap.c \
++#	../../malib/pgm/pgm.c
+ 
+ LOCAL_MODULE := sensor121
+ 
+diff --git a/fingerprint/service/soft_sensor/sensor121/algorithm/algorithm.h b/fingerprint/service/soft_sensor/sensor121/algorithm/algorithm.h
+index b7f7d29..5d8a190 100644
+--- a/fingerprint/service/soft_sensor/sensor121/algorithm/algorithm.h
++++ b/fingerprint/service/soft_sensor/sensor121/algorithm/algorithm.h
+@@ -32,6 +32,8 @@ int fp121_get_offset(uint8_t* imgPre, uint8_t* imgCur, int *offsetH,
+ 
+ int fp121_GetCoverRate(uint8_t* imgIn, uint8_t* imgBkg);
+ 
+-void fp121_remove_bkg_expand( u8* imgRawBuf, u8* imgBkgBuf, u8* imgExpBuf, s16* procBuf );
++void fp121_remove_bkg_expand( u8* imgRawBuf, u8* imgBkgBuf, u8* imgExpBuf);
++
++int fp121_checkWater(uint8_t *imgIn, uint8_t *imgBkg);
+ 
+ #endif /* ALGORITHM_H_ */
+diff --git a/fingerprint/service/soft_sensor/sensor121/algorithm/check_water.c b/fingerprint/service/soft_sensor/sensor121/algorithm/check_water.c
+new file mode 100644
+index 0000000..abf9846
+--- /dev/null
++++ b/fingerprint/service/soft_sensor/sensor121/algorithm/check_water.c
+@@ -0,0 +1,470 @@
++/*
++ * fp121_check_water.c
++ *
++ *  Created on: 2016-2-16
++ *      Author: zhl
++ */
++
++#include <stdio.h>
++#include <stdlib.h>
++#include <string.h>
++#include "config.h"
++#include "algorithm.h"
++
++//static void fft1(int *realPart, int *imagPart, int cnt) {
++//	int i, j;
++//	int k, k1, k2;
++//	//int k=6, N=64;
++//	int step, factor_step;
++//	int factor_real, factor_imag;
++//	int tmp_real, tmp_imag;
++//
++//	static int factorCos[] = {
++//		256, -256, 256, 0, -256, 256, 181, 0, -182, -256,
++//		256, 236, 181, 97, 0, -98, -182, -237, -256, 256, 251, 236, 212,
++//		181, 142, 97, 49, 0, -50, -98, -143, -182, -213, -237, -252, -256,
++//		256, 254, 251, 244, 236, 225, 212, 197, 181, 162, 142, 120, 97, 74,
++//		49, 25, 0, -26, -50, -75, -98, -121, -143, -163, -182, -198, -213,
++//		-226, -237, -245, -252, -255, -256 };
++//	static int factorSin[] = {
++//		0,-1,0,-256,-1,0,-182,-256,-182,-1,0,-98,-182,-237,-256,-237,
++//		-182,-98,-1,0,-50,-98,-143,-182,-213,-237,-252,-256,-252,-237,
++//		-213,-182,-143,-98,-50,-1,0,-26,-50,-75,-98,-121,-143,-163,-182,
++//		-198,-213,-226,-237,-245,-252,-255,-256,-255,-252,-245,-237,-226,
++//		-213,-198,-182,-163,-143,-121,-98,-75,-50,-26,-1};
++//	int ind = 0;
++//
++//	for (i = 0; i < 6; i++) {
++//		step = (1 << (i + 1));
++//		factor_step = (step >> 1);
++//		factor_real = factorCos[ind];
++//		factor_imag = factorSin[ind];
++//		ind++;
++//		for (j = 0; j < (step >> 1); j++) {
++//			for (k = j; k < 64; k += step) {
++//				k1 = (k << cnt);
++//				k2 = ((k + factor_step) << cnt);
++//				tmp_real = realPart[k2] * factor_real - imagPart[k2] * factor_imag;
++//				tmp_imag = realPart[k2] * factor_imag + imagPart[k2] * factor_real;
++//				realPart[k2] = realPart[k1] - (tmp_real >> 8);
++//				imagPart[k2] = imagPart[k1] - (tmp_imag >> 8);
++//				realPart[k1] = realPart[k1] + (tmp_real >> 8);
++//				imagPart[k1] = imagPart[k1] + (tmp_imag >> 8);
++//			}
++//			factor_real = factorCos[ind];
++//			factor_imag = factorSin[ind];
++//			ind++;
++//		}
++//	}
++//}
++//
++//static void fft2(int *realImg, int *imagImg) {
++//	int i, j, ind, ind1;
++//	int *pReal, *pImag;
++//	int tmpReal, tmpImag;
++//	static int index[] = {
++//		0,32,16,48, 8,40,24,56, 4,36,20,52,12,44,28,60,
++//		2,34,18,50,10,42,26,58, 6,38,22,54,14,46,30,62,
++//		1,33,17,49, 9,41,25,57, 5,37,21,53,13,45,29,61,
++//		3,35,19,51,11,43,27,59, 7,39,23,55,15, 47,31,63
++//	};
++//
++//	pReal = realImg;
++//	pImag = imagImg;
++//	for (i = 0; i < 64; i++) {
++//		for (j = 0; j < 64; j++) {
++//			ind = index[j];
++//			if (j < ind) {
++//				tmpReal = pReal[j];
++//				pReal[j] = pReal[ind];
++//				pReal[ind] = tmpReal;
++//			}
++//		}
++//		fft1(pReal, pImag, 0);
++//		pReal += 64;
++//		pImag += 64;
++//	}
++//	pReal = realImg;
++//	pImag = imagImg;
++//	for (i = 0; i < 64; i++) {
++//		for (j = 0; j < 64; j++) {
++//			ind = index[j];
++//			if (j < ind) {
++//				ind1 = (j << 6);
++//				ind <<= 6;
++//				tmpReal = pReal[ind1];
++//				tmpImag = pImag[ind1];
++//				pReal[ind1] = pReal[ind];
++//				pImag[ind1] = pImag[ind];
++//				pReal[ind] = tmpReal;
++//				pImag[ind] = tmpImag;
++//			}
++//		}
++//		fft1(pReal++, pImag++, 6);
++//	}
++//}
++//
++//static void getRmvbkg(uint8_t *imgIn, uint8_t *imgBkg, int *imgReal) {
++//	static int valList[] = {
++//		1024,1026,1028,1030,1032,1034,1036,1038,1040,1042,1044,1046,1049,1051,1053,1055,
++//		1057,1059,1061,1063,1066,1068,1070,1072,1074,1077,1079,1081,1083,1085,1088,1090,
++//		1092,1095,1097,1099,1101,1104,1106,1108,1111,1113,1116,1118,1120,1123,1125,1128,
++//		1130,1132,1135,1137,1140,1142,1145,1147,1150,1152,1155,1157,1160,1163,1165,1168,
++//		1170,1173,1176,1178,1181,1183,1186,1189,1192,1194,1197,1200,1202,1205,1208,1211,
++//		1214,1216,1219,1222,1225,1228,1231,1234,1237,1239,1242,1245,1248,1251,1254,1257,
++//		1260,1263,1266,1269,1273,1276,1279,1282,1285,1288,1291,1295,1298,1301,1304,1307,
++//		1311,1314,1317,1321,1324,1327,1331,1334,1337,1341,1344,1348,1351,1355,1358,1362,
++//		1365,1369,1372,1376,1380,1383,1387,1391,1394,1398,1402,1406,1409,1413,1417,1421,
++//		1425,1429,1432,1436,1440,1444,1448,1452,1456,1460,1464,1469,1473,1477,1481,1485,
++//		1489,1494,1498,1502,1507,1511,1515,1520,1524,1529,1533,1538,1542,1547,1551,1556,
++//		1560,1565,1570,1574,1579,1584,1589,1594,1598,1603,1608,1613,1618,1623,1628,1633,
++//		1638,1644,1649,1654,1659,1664,1670,1675,1680,1686,1691,1697,1702,1708,1713,1719,
++//		1725,1730,1736,1742,1748,1753,1759,1765,1771,1777,1783,1789,1796,1802,1808,1814,
++//		1820,1827,1833,1840,1846,1853,1859,1866,1872,1879,1886,1893,1900,1907,1913,1920,
++//		1928,1935,1942,1949,1956,1964,1971,1978,1986,1993,2001,2009,2016,2024,2032,2040};
++//	int row, col;
++//	uint8_t *pIn, *pBkg;
++//	int *pReal;
++//
++//	pIn = imgIn;
++//	pBkg = imgBkg;
++//	pReal = imgReal;
++//	for (row = 0; row < 64; row++) {
++//		for (col = 0; col < 64; col += 8, pIn += 8, pBkg += 8, pReal += 8) {
++//			pReal[0] = valList[(int) pIn[0]] - valList[(int) pBkg[0]];
++//			pReal[1] = valList[(int) pIn[1]] - valList[(int) pBkg[1]];
++//			pReal[2] = valList[(int) pIn[2]] - valList[(int) pBkg[2]];
++//			pReal[3] = valList[(int) pIn[3]] - valList[(int) pBkg[3]];
++//			pReal[4] = valList[(int) pIn[4]] - valList[(int) pBkg[4]];
++//			pReal[5] = valList[(int) pIn[5]] - valList[(int) pBkg[5]];
++//			pReal[6] = valList[(int) pIn[6]] - valList[(int) pBkg[6]];
++//			pReal[7] = valList[(int) pIn[7]] - valList[(int) pBkg[7]];
++//		}
++//		pIn += 56;
++//		pBkg += 56;
++//	}
++//}
++//
++///* 功能: 检测水滴
++// * @return 1:认为有手指，0:无手指
++// */
++//int fp121_checkWater(uint8_t *imgIn, uint8_t *imgBkg) {
++//	int row, col;
++//	uint8_t *pIn, *pBkg;
++//	int tmp1, tmp2;
++//	int num = 0;
++//	int ind=0, maxRow = 0, maxCol = 0;
++//	int64_t maxScore = 0, tmp = 0;
++//	int *pReal, *pImag;
++//	int realPart[4096], imagPart[4096];
++//
++//	//LOGD("start\n");
++//
++//	pIn = imgIn + 3388;
++//	pBkg = imgBkg + 3388;
++//	for (row = 0; row < 64; row++) {
++//		for (col = 0; col < 64; col += 8, pIn += 8, pBkg += 8) {
++//			if ((int) pIn[0] - (int) pBkg[0] > 5) num++;
++//			if ((int) pIn[1] - (int) pBkg[1] > 5) num++;
++//			if ((int) pIn[2] - (int) pBkg[2] > 5) num++;
++//			if ((int) pIn[3] - (int) pBkg[3] > 5) num++;
++//			if ((int) pIn[4] - (int) pBkg[4] > 5) num++;
++//			if ((int) pIn[5] - (int) pBkg[5] > 5) num++;
++//			if ((int) pIn[6] - (int) pBkg[6] > 5) num++;
++//			if ((int) pIn[7] - (int) pBkg[7] > 5) num++;
++//		}
++//		pIn += 56;
++//		pBkg += 56;
++//	}
++//	//LOGD("num=%d", num);
++//	if (num < 3000) return 0;
++//	memset(imagPart, 0, 4096 * sizeof(int));
++//	getRmvbkg(imgIn + 3388, imgBkg + 3388, realPart);
++//	fft2(realPart, imagPart);
++//	pReal = realPart;
++//	pImag = imagPart;
++//	pReal[0] = 0;
++//	pImag[0] = 0;
++//	for (row = 0; row < 4096; row += 4, pReal += 4, pImag += 4) {
++//		tmp1 = pReal[0];
++//		tmp2 = pImag[0];
++//		tmp = (int64_t)tmp1 * tmp1 + (int64_t)tmp2 * tmp2;
++//		if (tmp > maxScore) {
++//			maxScore = tmp;
++//			ind = row;
++//		}
++//		tmp1 = pReal[1];
++//		tmp2 = pImag[1];
++//		tmp = (int64_t)tmp1 * tmp1 + (int64_t)tmp2 * tmp2;
++//		if (tmp > maxScore) {
++//			maxScore = tmp;
++//			ind = row+1;
++//		}
++//		tmp1 = pReal[2];
++//		tmp2 = pImag[2];
++//		tmp = (int64_t)tmp1 * tmp1 + (int64_t)tmp2 * tmp2;
++//		if (tmp > maxScore) {
++//			maxScore = tmp;
++//			ind = row+2;
++//		}
++//		tmp1 = pReal[3];
++//		tmp2 = pImag[3];
++//		tmp = (int64_t)tmp1 * tmp1 + (int64_t)tmp2 * tmp2;
++//		if (tmp > maxScore) {
++//			maxScore = tmp;
++//			ind = row+3;
++//		}
++//	}
++//	maxRow = (ind >> 6);
++//	maxCol = (ind % 64);
++//
++//	//LOGD("maxRow=%d maxCol=%d ind=%d", maxRow, maxCol, ind);
++//
++//	if ((maxRow > 5 && maxRow < 20) || (maxCol > 5 && maxCol < 20)
++//			|| (maxRow > 45 && maxRow < 60) || (maxCol > 45 && maxCol < 60))
++//		return 1;
++//
++//	return 0;
++//}
++
++
++
++// imgIn:ԭͼ
++//imgBkgͼ
++int fp121_checkWater(uint8_t *imgIn, uint8_t *imgBkg)
++{
++	static int valList[] = {1024,1026,1028,1030,1032,1034,1036,1038,1040,1042,1044,1046,1049,1051,1053,1055,
++                            1057,1059,1061,1063,1066,1068,1070,1072,1074,1077,1079,1081,1083,1085,1088,1090,
++                            1092,1095,1097,1099,1101,1104,1106,1108,1111,1113,1116,1118,1120,1123,1125,1128,
++                            1130,1132,1135,1137,1140,1142,1145,1147,1150,1152,1155,1157,1160,1163,1165,1168,
++                            1170,1173,1176,1178,1181,1183,1186,1189,1192,1194,1197,1200,1202,1205,1208,1211,
++                            1214,1216,1219,1222,1225,1228,1231,1234,1237,1239,1242,1245,1248,1251,1254,1257,
++                            1260,1263,1266,1269,1273,1276,1279,1282,1285,1288,1291,1295,1298,1301,1304,1307,
++                            1311,1314,1317,1321,1324,1327,1331,1334,1337,1341,1344,1348,1351,1355,1358,1362,
++                            1365,1369,1372,1376,1380,1383,1387,1391,1394,1398,1402,1406,1409,1413,1417,1421,
++                            1425,1429,1432,1436,1440,1444,1448,1452,1456,1460,1464,1469,1473,1477,1481,1485,
++                            1489,1494,1498,1502,1507,1511,1515,1520,1524,1529,1533,1538,1542,1547,1551,1556,
++                            1560,1565,1570,1574,1579,1584,1589,1594,1598,1603,1608,1613,1618,1623,1628,1633,
++                            1638,1644,1649,1654,1659,1664,1670,1675,1680,1686,1691,1697,1702,1708,1713,1719,
++                            1725,1730,1736,1742,1748,1753,1759,1765,1771,1777,1783,1789,1796,1802,1808,1814,
++                            1820,1827,1833,1840,1846,1853,1859,1866,1872,1879,1886,1893,1900,1907,1913,1920,
++                            1928,1935,1942,1949,1956,1964,1971,1978,1986,1993,2001,2009,2016,2024,2032,2040};
++
++	static int src[14400], tSrc[14400];// м洢ڴ
++	int row,col,i;
++	int *pSrc, *ptSrc;
++	uint8_t *pIn, *pBkg;
++	int tmp,tmp1,tmp2;
++	int maxD, minD, fold, aveTH;
++	int cnt, cnt1, cnt2;
++
++	// ֵ˲
++	pIn = imgIn;
++	pBkg = imgBkg;
++	pSrc = src+121;
++	for(row=1;row<119;row++)
++	{
++		for(col=1;col<119;col++)
++		{
++			tmp = ( valList[(int)pIn[0]]-valList[(int)pBkg[0]] +
++				    valList[(int)pIn[1]]-valList[(int)pBkg[1]] +
++				    valList[(int)pIn[2]]-valList[(int)pBkg[2]] );
++			pIn+=120;
++			pBkg+=120;
++			tmp += ( valList[(int)pIn[0]]-valList[(int)pBkg[0]] +
++				     valList[(int)pIn[1]]-valList[(int)pBkg[1]] +
++				     valList[(int)pIn[2]]-valList[(int)pBkg[2]] );
++			pIn+=120;
++			pBkg+=120;
++			tmp += ( valList[(int)pIn[0]]-valList[(int)pBkg[0]] +
++				     valList[(int)pIn[1]]-valList[(int)pBkg[1]] +
++				     valList[(int)pIn[2]]-valList[(int)pBkg[2]] );
++			pIn-=239;
++			pBkg-=239;
++
++			*pSrc = tmp;
++			pSrc++;
++		}
++		pIn+=2;
++		pBkg+=2;
++		pSrc+=2;
++	}
++
++	pSrc = src+121;;
++	ptSrc = tSrc+242; // ͼ
++	for(row=2;row<118;row++)
++	{
++		for(col=2;col<118;col++)
++		{
++			tmp1 = pSrc[0]+pSrc[1]+pSrc[2];
++			pSrc+=240;
++			tmp1 -= (pSrc[0]+pSrc[1]+pSrc[2]); // в
++
++			tmp2 = pSrc[0]-pSrc[2];
++			pSrc-=120;
++			tmp2+=(pSrc[0]-pSrc[2]);
++			pSrc-=120;
++			tmp2+=(pSrc[0]-pSrc[2]); // в
++			*ptSrc = tmp1*tmp1+tmp2*tmp2;
++			pSrc++;
++			ptSrc++;
++		}
++		pSrc+=4;
++		ptSrc+=4;
++	}
++
++	maxD = 0;
++	minD = 0xfffffff;
++	ptSrc = tSrc+484;
++	pIn = imgIn+484;
++	pBkg = imgBkg+484;
++	for(row=0;row<14;row++)
++	{
++		for(col=0;col<14;col++)
++		{
++			tmp1 =(ptSrc[0]+ptSrc[1]+ptSrc[2]+ptSrc[3]+ptSrc[4]+ptSrc[5]+ptSrc[6]+ptSrc[7]);
++			ptSrc+=120;
++			tmp1 +=(ptSrc[0]+ptSrc[1]+ptSrc[2]+ptSrc[3]+ptSrc[4]+ptSrc[5]+ptSrc[6]+ptSrc[7]);
++			ptSrc+=120;
++			tmp1 +=(ptSrc[0]+ptSrc[1]+ptSrc[2]+ptSrc[3]+ptSrc[4]+ptSrc[5]+ptSrc[6]+ptSrc[7]);
++			ptSrc+=120;
++			tmp1 +=(ptSrc[0]+ptSrc[1]+ptSrc[2]+ptSrc[3]+ptSrc[4]+ptSrc[5]+ptSrc[6]+ptSrc[7]);
++			ptSrc+=120;
++			tmp1 +=(ptSrc[0]+ptSrc[1]+ptSrc[2]+ptSrc[3]+ptSrc[4]+ptSrc[5]+ptSrc[6]+ptSrc[7]);
++			ptSrc+=120;
++			tmp1 +=(ptSrc[0]+ptSrc[1]+ptSrc[2]+ptSrc[3]+ptSrc[4]+ptSrc[5]+ptSrc[6]+ptSrc[7]);
++			ptSrc+=120;
++			tmp1 +=(ptSrc[0]+ptSrc[1]+ptSrc[2]+ptSrc[3]+ptSrc[4]+ptSrc[5]+ptSrc[6]+ptSrc[7]);
++			ptSrc+=120;
++			tmp1 +=(ptSrc[0]+ptSrc[1]+ptSrc[2]+ptSrc[3]+ptSrc[4]+ptSrc[5]+ptSrc[6]+ptSrc[7]);
++
++			tmp2 =(((int)pIn[0]+(int)pIn[1]+(int)pIn[2]+(int)pIn[3]+(int)pIn[4]+(int)pIn[5]+(int)pIn[6]+(int)pIn[7]) -
++				((int)pBkg[0]+(int)pBkg[1]+(int)pBkg[2]+(int)pBkg[3]+(int)pBkg[4]+(int)pBkg[5]+(int)pBkg[6]+(int)pBkg[7]));
++			pIn+=120;
++			pBkg+=120;
++			tmp2 +=(((int)pIn[0]+(int)pIn[1]+(int)pIn[2]+(int)pIn[3]+(int)pIn[4]+(int)pIn[5]+(int)pIn[6]+(int)pIn[7]) -
++				((int)pBkg[0]+(int)pBkg[1]+(int)pBkg[2]+(int)pBkg[3]+(int)pBkg[4]+(int)pBkg[5]+(int)pBkg[6]+(int)pBkg[7]));
++			pIn+=120;
++			pBkg+=120;
++			tmp2 +=(((int)pIn[0]+(int)pIn[1]+(int)pIn[2]+(int)pIn[3]+(int)pIn[4]+(int)pIn[5]+(int)pIn[6]+(int)pIn[7]) -
++				((int)pBkg[0]+(int)pBkg[1]+(int)pBkg[2]+(int)pBkg[3]+(int)pBkg[4]+(int)pBkg[5]+(int)pBkg[6]+(int)pBkg[7]));
++			pIn+=120;
++			pBkg+=120;
++			tmp2 +=(((int)pIn[0]+(int)pIn[1]+(int)pIn[2]+(int)pIn[3]+(int)pIn[4]+(int)pIn[5]+(int)pIn[6]+(int)pIn[7]) -
++				((int)pBkg[0]+(int)pBkg[1]+(int)pBkg[2]+(int)pBkg[3]+(int)pBkg[4]+(int)pBkg[5]+(int)pBkg[6]+(int)pBkg[7]));
++			pIn+=120;
++			pBkg+=120;
++			tmp2 +=(((int)pIn[0]+(int)pIn[1]+(int)pIn[2]+(int)pIn[3]+(int)pIn[4]+(int)pIn[5]+(int)pIn[6]+(int)pIn[7]) -
++				((int)pBkg[0]+(int)pBkg[1]+(int)pBkg[2]+(int)pBkg[3]+(int)pBkg[4]+(int)pBkg[5]+(int)pBkg[6]+(int)pBkg[7]));
++			pIn+=120;
++			pBkg+=120;
++			tmp2 +=(((int)pIn[0]+(int)pIn[1]+(int)pIn[2]+(int)pIn[3]+(int)pIn[4]+(int)pIn[5]+(int)pIn[6]+(int)pIn[7]) -
++				((int)pBkg[0]+(int)pBkg[1]+(int)pBkg[2]+(int)pBkg[3]+(int)pBkg[4]+(int)pBkg[5]+(int)pBkg[6]+(int)pBkg[7]));
++			pIn+=120;
++			pBkg+=120;
++			tmp2 +=(((int)pIn[0]+(int)pIn[1]+(int)pIn[2]+(int)pIn[3]+(int)pIn[4]+(int)pIn[5]+(int)pIn[6]+(int)pIn[7]) -
++				((int)pBkg[0]+(int)pBkg[1]+(int)pBkg[2]+(int)pBkg[3]+(int)pBkg[4]+(int)pBkg[5]+(int)pBkg[6]+(int)pBkg[7]));
++			pIn+=120;
++			pBkg+=120;
++			tmp2 +=(((int)pIn[0]+(int)pIn[1]+(int)pIn[2]+(int)pIn[3]+(int)pIn[4]+(int)pIn[5]+(int)pIn[6]+(int)pIn[7]) -
++				((int)pBkg[0]+(int)pBkg[1]+(int)pBkg[2]+(int)pBkg[3]+(int)pBkg[4]+(int)pBkg[5]+(int)pBkg[6]+(int)pBkg[7]));
++			if(tmp1>maxD)
++			{
++				maxD = tmp1;
++			}
++			else if((tmp1<minD) && (tmp2>320))
++			{
++				minD = tmp1;
++			}
++			ptSrc-=832;
++			pIn-=832;
++			pBkg-=832;
++		}
++		ptSrc+=848;
++		pIn+=848;
++		pBkg+=848;
++	}
++
++	if(minD==0)
++	{
++		return 0;
++	}
++	else
++	{
++		fold = maxD / minD;
++		if(fold > 1024)
++			aveTH = (minD<<3);
++		else if(fold>512)
++			aveTH = (minD<<2);
++		else if(fold>256)
++			aveTH = (minD<<1);
++		else if(fold>128)
++			aveTH = minD;
++		else
++			aveTH = (maxD>>8);
++	}
++
++	ptSrc=tSrc+3387;
++	pSrc = src;
++	for(row=0;row<64;row++)
++	{
++		for(col=0;col<64;col++)
++		{
++			if(ptSrc[1]>aveTH)
++			{
++				cnt = ( (ptSrc[0]>aveTH) ? 1 : 0 );
++				cnt += ( (ptSrc[2]>aveTH) ? 1 : 0 );
++				cnt += ( (ptSrc[121]>aveTH) ? 1 : 0 );
++				cnt += ( (ptSrc[-119]>aveTH) ? 1 : 0 );
++				if(cnt>1)
++					*pSrc = 1;
++				else
++					*pSrc = 0;
++
++			}
++			else
++				*pSrc = 0;
++
++			pSrc++;
++			ptSrc++;
++		}
++		ptSrc+=56;
++	}
++
++	pSrc = src;
++	cnt1 = 0;
++	for(row=0;row<64;row++)
++	{
++		for(col=0;col<63;col++)
++		{
++			if(pSrc[0]==1 && pSrc[1]==0)
++				cnt1++;
++
++			pSrc++;
++		}
++		pSrc++;
++	}
++
++	pSrc = src;
++	cnt2 = 0;
++	for(col=0;col<64;col++)
++	{
++		for(row=0;row<63;row++)
++		{
++			if(pSrc[0]==1 && pSrc[64]==0)
++				cnt2++;
++
++			pSrc+=64;
++		}
++		pSrc-=4031;
++	}
++	if( (cnt1>300) || (cnt2>300) )
++		return 1;
++	else
++		return 0;
++}
++
++
++
++
++
+diff --git a/fingerprint/service/soft_sensor/sensor121/algorithm/detect.c b/fingerprint/service/soft_sensor/sensor121/algorithm/detect.c
+index 5ab7145..a6707bc 100644
+--- a/fingerprint/service/soft_sensor/sensor121/algorithm/detect.c
++++ b/fingerprint/service/soft_sensor/sensor121/algorithm/detect.c
+@@ -80,7 +80,7 @@ int fp121_press_detect_texture(uint8_t *imgBuf, int parTH, int *rangeWeight)
+     *rangeWeight = afs121_corrWeight(imgBuf);
+     LOGD("curTH=%d, rangeWeight=%d\n", curTH, *rangeWeight);
+     if (*rangeWeight > curTH) {
+-        if(*rangeWeight > 8 * curTH){
++        if(*rangeWeight > 4 * curTH){
+             return 1;
+         }
+     }
+diff --git a/fingerprint/service/soft_sensor/sensor121/algorithm/removebkg.c b/fingerprint/service/soft_sensor/sensor121/algorithm/removebkg.c
+index aee9e7b..ada82bc 100644
+--- a/fingerprint/service/soft_sensor/sensor121/algorithm/removebkg.c
++++ b/fingerprint/service/soft_sensor/sensor121/algorithm/removebkg.c
+@@ -273,8 +273,10 @@ static void expandGrey( s16* srcHead, u8* expHead )
+     }
+ }
+ 
+-void fp121_remove_bkg_expand( u8* imgRawBuf, u8* imgBkgBuf, u8* imgExpBuf, s16* procBuf )
++void fp121_remove_bkg_expand( u8* imgRawBuf, u8* imgBkgBuf, u8* imgExpBuf)
+ {
++	static s16 procBuf[120*120];
++	memset(procBuf, 0, 120*120);
+     rmvBkg_AFS121( imgRawBuf, imgBkgBuf, procBuf );
+     expandGrey( procBuf, imgExpBuf );
+ }
+diff --git a/fingerprint/service/soft_sensor/sensor121/sensor_121.c b/fingerprint/service/soft_sensor/sensor121/sensor_121.c
+index e15bf9f..46ccfbd 100644
+--- a/fingerprint/service/soft_sensor/sensor121/sensor_121.c
++++ b/fingerprint/service/soft_sensor/sensor121/sensor_121.c
+@@ -339,15 +339,15 @@ static inline int calc_paraN(void)
+ int fp121_calc_interrupt_parameters(void)
+ {
+     int avg = 0, ret = 0;
+-    uint8_t line[120] = {0};
++    uint8_t line[IMAGE_W+2] = {0};
+     int n, a;
+ 
+     fp121_detect_mode_parameters(0x3c, 0x3c, 0x3c, 0x01, 0x01, 0, 0, 0xe0);
+     platform_msleep(15);// time ???
+ 
+     sensor_set_mode(CAPTURE_MODE);
+-    sensor_read_line(line, 120);
+-    avg = sensor_get_grey(line, 120) / 120;
++    sensor_read_line(line, IMAGE_W+2);
++    avg = sensor_get_grey(line+2, IMAGE_W) / IMAGE_W;
+     LOGD("avg=0x%x.\n", avg);
+ 
+     ret = (avg > 0) ? SUCCESS : ERROR_READ_LINE_FAIL;
+diff --git a/fingerprint/service/soft_sensor/sensor121/sensor_wrapper.c b/fingerprint/service/soft_sensor/sensor121/sensor_wrapper.c
+index 495c19a..673a59f 100644
+--- a/fingerprint/service/soft_sensor/sensor121/sensor_wrapper.c
++++ b/fingerprint/service/soft_sensor/sensor121/sensor_wrapper.c
+@@ -291,22 +291,36 @@ static int sensor121_destory(void)
+  */
+ static int algorithm121_press_detect_texture(void *image_in, int type)
+ {
+-    int dtc, ret, weight = 0;
+-    unsigned char *img = (unsigned char *)context_get_img_buf();
+-    (void) type;
+-    LOGD("start.\n");
+-    fp121_remove_bkg((unsigned char *)image_in, context_get_sensor121_bkg(), g_auth_ctx->remove_bkg_img);
+-    memcpy(img, g_auth_ctx->remove_bkg_img, IMAGE_SIZE);
+-    dtc = fp121_press_detect_texture(img, g_config.detect_threshold, &weight);
+-    LOGD("------------------dtc = %d \n",dtc);
+-    ret = ( dtc == 1 ) ? NORMAL_PRESSED : NORMAL_UNPRESSED;
+-#ifdef NEW_AFS121_REMOVE_BKG
+-    memset(g_auth_ctx->remove_bkg_img, 0, IMAGE_SIZE);
+-    fp121_remove_bkg_expand((unsigned char *)image_in, context_get_sensor121_bkg(),
+-            g_auth_ctx->remove_bkg_img, s_calc_buf);
+-#endif
+-    LOGD("end.\n");
+-    return ret;
++	int dtc, ret, weight = 0;
++	unsigned char *img = (unsigned char *) context_get_img_buf();
++	(void) type;
++
++	LOGD("start.\n");
++	fp121_remove_bkg((unsigned char *) image_in, context_get_sensor121_bkg(),
++			g_auth_ctx->remove_bkg_img);
++	memcpy(img, g_auth_ctx->remove_bkg_img, IMAGE_SIZE);
++
++	dtc = fp121_press_detect_texture(img, g_config.detect_threshold, &weight);
++	LOGD("------------------dtc = %d \n", dtc);
++	ret = (dtc == 1) ? NORMAL_PRESSED : NORMAL_UNPRESSED;
++	if(type==AUTHENTICATE_DETECT) {
++		memset(g_auth_ctx->remove_bkg_img, 0, IMAGE_SIZE);
++		fp121_remove_bkg_expand((unsigned char *)image_in, context_get_sensor121_bkg(),
++				g_auth_ctx->remove_bkg_img);
++	}
++    /*
++    static int count=0;
++    char name[100]={0};
++    if(dtc == 1){
++        sprintf(name, "/data/system/users/0/fpdata/press_src_%.5d.bmp", count);
++        save_bmp_file(name, image_in, IMAGE_W, IMAGE_H);
++        sprintf(name, "/data/system/users/0/fpdata/press_out_%.5d.bmp", count);
++        save_bmp_file(name, g_auth_ctx->remove_bkg_img, IMAGE_W, IMAGE_H);
++        count++;
++    }
++    */
++	LOGD("end.\n");
++	return ret;
+ }
+ 
+ /* 计算能量值
+@@ -380,6 +394,9 @@ static int algorithm121_authenticate(int *fid_count)
+     {
+         policy_get_template_data(fidlist[len], template_data);
+         //注意：afs_match改变了src内数据
++        static int count=0;
++        char name[100]={0};
++
+         val = afs_match(tmp_img, template_data, TEMPLATE_NUM, g_config.auth_level, &score, &snum);
+         LOGD("score=%d, characteristic_num=%d, score_threshold=%d, characteristic_threshold=%d, val=%d.\n",
+              score, snum, g_config.auth_score, g_config.auth_characteristic_num, val);
+@@ -414,12 +431,10 @@ static int algorithm121_enroll(void)
+     int ret = SUCCESS, fid_count = 0;
+     unsigned char *enroll_image = (unsigned char *)context_get_img_buf();
+ 
+-#ifdef NEW_AFS121_REMOVE_BKG
++
+     fp121_remove_bkg_expand(g_enroll_ctx->max_image, context_get_sensor121_bkg(),
+-            enroll_image, s_calc_buf);
+-#else
+-    fp121_remove_bkg(g_enroll_ctx->max_image, context_get_sensor121_bkg(), enroll_image);
+-#endif
++            enroll_image);
++
+     if( g_config.filter_duplicate_enroll )
+     {
+         memcpy(g_auth_ctx->remove_bkg_img, enroll_image, IMAGE_SIZE);
+@@ -437,6 +452,15 @@ static int algorithm121_enroll(void)
+ 				return ERROR_ENROLL_PART_TOUCH;
+ 		}
+ 	}
++/*
++    static int count=0;
++    char name[100]={0};
++    sprintf(name, "/data/system/users/0/fpdata/enroll_src_%.5d.bmp", count);
++    save_bmp_file(name, g_enroll_ctx->max_image, IMAGE_W, IMAGE_H);
++    sprintf(name, "/data/system/users/0/fpdata/enroll_out_%.5d.bmp", count);
++    save_bmp_file(name, enroll_image, IMAGE_W, IMAGE_H);
++    count++;
++*/
+ 	ret = afs_enroll(enroll_image, g_enroll_ctx->template_data, TEMPLATE_NUM);
+     g_enroll_ctx->max_score = 0;
+     memset(g_enroll_ctx->max_image, 0, IMAGE_SIZE);
+@@ -803,12 +827,8 @@ static int sensor121_factory_test_enroll(void)
+     int ret = SUCCESS;
+     unsigned char *enroll_image = (unsigned char *)context_get_img_buf();
+     LOGD("start.\n");
+-#ifdef NEW_AFS121_REMOVE_BKG
+-    fp121_remove_bkg_expand(g_enroll_ctx->max_image, context_get_sensor121_bkg(),
+-            enroll_image, s_calc_buf);
+-#else
+-    fp121_remove_bkg(g_enroll_ctx->max_image, context_get_sensor121_bkg(), enroll_image);
+-#endif
++
++    fp121_remove_bkg_expand(g_enroll_ctx->max_image, context_get_sensor121_bkg(),enroll_image);
+     ret = afs_enroll(enroll_image, g_enroll_ctx->test_template_data, TEST_TEMPLATE_NUM);
+     g_enroll_ctx->max_score = 0;
+     memset(g_enroll_ctx->max_image, 0, IMAGE_SIZE);
+@@ -880,12 +900,7 @@ static int sensor121_factory_test_get_image(void *image)
+                 ret = algorithm121_get_energy(image_in);
+             }
+             memcpy(image_bkg, context_get_sensor121_bkg(), IMAGE_SIZE);
+-#ifdef NEW_AFS121_REMOVE_BKG
+-            fp121_remove_bkg_expand(image_in, image_bkg,
+-                    image_out, s_calc_buf);
+-#else
+-            fp121_remove_bkg(image_in, image_bkg, image_out);
+-#endif
++            fp121_remove_bkg_expand(image_in, image_bkg, image_out);
+             afs_enhance(image_out, image_enhance);
+          
+             read_bmp_head(img, 1078, IMAGE_W, IMAGE_H);

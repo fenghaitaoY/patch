@@ -1,0 +1,44 @@
+diff --git a/fingerprint/service/soft_sensor/sensor121/sensor_121.c b/fingerprint/service/soft_sensor/sensor121/sensor_121.c
+index 1fc015d..979cdfe 100644
+--- a/fingerprint/service/soft_sensor/sensor121/sensor_121.c
++++ b/fingerprint/service/soft_sensor/sensor121/sensor_121.c
+@@ -134,6 +134,11 @@ int fp121_capture_mode(void)
+         sensor_set_register(MA_END_LINE_REG, 121);
+     }
+     LOGD("volt = 0x%x, refctrl = 0x%x, capacity = 0x%x", volt, refctrl, capacity);
++    if(volt == 0 && refctrl == 0){
++        LOGD("-------------T sdcard upgrade --------\n");
++        fp121_calc_interrupt_parameters();
++        fp121_detect_mode();
++    }
+     s_sensor_mode = CAPTURE_MODE;
+     return SUCCESS;
+ }
+diff --git a/fingerprint/service/soft_sensor/sensor121/sensor_context.c b/fingerprint/service/soft_sensor/sensor121/sensor_context.c
+index 72a297b..5d9ac50 100644
+--- a/fingerprint/service/soft_sensor/sensor121/sensor_context.c
++++ b/fingerprint/service/soft_sensor/sensor121/sensor_context.c
+@@ -53,6 +53,14 @@ int init_sensor121_context(void)
+     ret = policy_get_sensor_para(SNESOR_CONTEXT_PROPERTY_NAME,
+             &sensor_ctx.property, sizeof(sensor_property_t));
+ 
++    if((INTERRUPT_CALIBRATED == sensor_ctx.property.interrupt_calibrated ||
++            SENSOR_CALIBRATED==sensor_ctx.property.sensor_param_calibrated)
++            && sensor_ctx.property.volt == 0x0){
++        LOGD("restart sensor param calibrated \n");
++        sensor_ctx.property.sensor_param_calibrated = 0;
++        sensor_ctx.property.interrupt_calibrated = 0;
++    }
++
+     if ( INTERRUPT_CALIBRATED != sensor_ctx.property.interrupt_calibrated )
+     {
+         sensor_ctx.property.bkg_energy = 0x7fffffff;
+diff --git a/version/standard_version.csv b/version/standard_version.csv
+index 1e340e0..609ee42 100644
+--- a/version/standard_version.csv
++++ b/version/standard_version.csv
+@@ -1,2 +1,2 @@
+ Major Version, Comment
+-4.0.01, sensor 121 stable
+\ No newline at end of file
++4.0.06, sensor 121 stable
