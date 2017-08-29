@@ -1,0 +1,57 @@
+diff --git a/fingerprint/client/libfprint/process/authenticate.c b/fingerprint/client/libfprint/process/authenticate.c
+index 83dd0fe..874442e 100644
+--- a/fingerprint/client/libfprint/process/authenticate.c
++++ b/fingerprint/client/libfprint/process/authenticate.c
+@@ -162,12 +162,17 @@ void* authenticate_work(void *q)
+ 	int r = 0;
+ 	int count = 0;
+ 	int cancelflag = 0;
++	int chipid = -1;
++	int cover_type = -1;
+ 	static int s_interrupt_error_trigger_count;
+ 	struct cmd_entry *qe = (struct cmd_entry *) q;
+ 	struct cmd_auth_data *cmd_auth = (struct cmd_auth_data *) qe->parameter;
+ 	int calibrated, down=0, calibrate_count = 10;
+ 	uint32_t fids[FINGERPRINT_SIZE];
+ 	int fid_count = 0;
++    //add fht
++    int esdfail_num =0;
++    //end fht
+ 	memset(fids, 0, sizeof(fids));
+ 	LOGD("authenticate start\n");
+ 	gAuthCount = g_config.auth_retry_times;
+@@ -186,6 +191,34 @@ void* authenticate_work(void *q)
+ 			//TODO  change the logic/
+ 			LOGD("go to kernel\n");
+ 			dc_send_cmd(SLEEP);
++#if defined(A80) || defined(A83)
++			//esd procedure START
++			chipid = ma_tac_factory_get_vendor();
++			LOGD("resume1 chipid=%d \n",chipid);
++
++			while(chipid != 0x53 && chipid != 0x50) {
++				if (qe->cancelled) {
++					LOGD(" esd  authenticate cancelled\n");
++			//		return NULL;
++				}
++                LOGD("-----esd while -----");
++                dc_send_cmd(SCREEN_OFF);
++
++                if(esdfail_num > 2){
++                    usleep(60000);
++                }else{
++                    usleep(10000);
++                }
++
++                dc_send_cmd(SCREEN_ON);
++
++				chipid = ma_tac_factory_get_vendor();
++                esdfail_num++;
++				LOGD("resume2 chipid=%d \n",chipid);
++			}
++            esdfail_num = 0;
++			//esd procedure END
++#endif
+ 			if ( qe->cancelled ) {
+ 				LOGD("command cancelled\n");
+ 				return 0;

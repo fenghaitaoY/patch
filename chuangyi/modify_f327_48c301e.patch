@@ -1,0 +1,124 @@
+diff --git a/fingerprint/client/fingerprintso/ma_release_Jnifp.c b/fingerprint/client/fingerprintso/ma_release_Jnifp.c
+index 463e561..6787dcb 100644
+--- a/fingerprint/client/fingerprintso/ma_release_Jnifp.c
++++ b/fingerprint/client/fingerprintso/ma_release_Jnifp.c
+@@ -244,6 +244,7 @@ JNIEXPORT jint JNICALL Java_ma_release_Jnifp_stopAuthenticate
+   (JNIEnv *env, jclass cls){
+ 	LOGD("start \n");
+ 	int ret = 0;
++    usleep(1000);
+     ret = bio_cancel();
+ 	LOGD("end \n");
+ 	return ret;
+diff --git a/fingerprint/client/libfprint/process/navigate.c b/fingerprint/client/libfprint/process/navigate.c
+index 7016f07..c2a077b 100644
+--- a/fingerprint/client/libfprint/process/navigate.c
++++ b/fingerprint/client/libfprint/process/navigate.c
+@@ -91,7 +91,7 @@ void * navigate_work(void *q)
+     uint32_t fids[FINGERPRINT_SIZE];
+     int fid_count = 0;
+     memset(fids, 0, sizeof(fids));
+-
++    int down_flag=0;
+     /**************************** navigate ******************************/
+     while (1){
+ #ifdef A120
+@@ -103,7 +103,11 @@ void * navigate_work(void *q)
+         dc_send_cmd(SLEEP);
+ 
+ 		if ( qe->cancelled ) {
+-            LOGD("command cancelled\n");
++            LOGD("------fff----command cancelled\n");
++            if(down_flag == 1){
++                down_flag = 0;
++                dc_send_cmd(TAP_UP);
++            }
+             return NULL;
+         }
+         ma_tac_init_navigate();
+@@ -111,8 +115,9 @@ void * navigate_work(void *q)
+         tap_result = NAVI_NONE;
+         do{
+             tap_result = ma_tac_navigate_tap(tap_result);
+-            // LOGD(" tap result = %d", tap_result);
++            LOGD(" tap result = %d", tap_result);
+             if (down_count == 0 && (tap_result & NAVI_TAP_DOWN)) {
++                down_flag = 1;
+                 report_navi_result(NAVI_TAP_DOWN);
+                 gettimeofday(&now_tap_time,NULL);
+                 tap_down_time = now_tap_time.tv_sec * 1000 + now_tap_time.tv_usec / 1000;
+@@ -120,6 +125,7 @@ void * navigate_work(void *q)
+             }
+ 
+             if (tap_result & NAVI_TAP_UP) {
++                down_flag = 0;
+                 report_navi_result(NAVI_TAP_UP);
+             }
+ 
+@@ -132,9 +138,14 @@ void * navigate_work(void *q)
+             }
+ 
+             if ( qe->cancelled ) {
++                if(down_flag == 1){
++                    down_flag = 0;
++                    dc_send_cmd(TAP_UP);
++                }
+                 LOGD("command cancelled\n");
+                 return NULL;
+             }
++            LOGD("----------------while = %d",tap_result & NAVI_TAP_DOWN);
+         }while(tap_result & NAVI_TAP_DOWN);
+         // err trigger proccess
+         if(tap_result == NAVI_NONE) {
+@@ -157,11 +168,15 @@ void * navigate_work(void *q)
+                 s_interrupt_error_trigger_count = 0;
+             }
+         }
+-        LOGD("down_count = %d", down_count);
++        LOGD("-----down_count = %d", down_count);
+         navi_result = ma_tac_navigate_direction();
+         report_navi_result(navi_result);
+         if ( qe->cancelled ) {
+             LOGD("command cancelled\n");
++            if(down_flag == 1){
++                down_flag = 0;
++                dc_send_cmd(TAP_UP);
++            }
+             return NULL;
+         }
+ 
+@@ -188,6 +203,10 @@ void * navigate_work(void *q)
+             }
+             if ( qe->cancelled ) {
+                 LOGD("command cancelled\n");
++                if(down_flag == 1){
++                    down_flag = 0;
++                    dc_send_cmd(TAP_UP);
++                }
+                 return NULL;
+             }
+         }
+diff --git a/fingerprint/service/platform/android/storage/storage.c b/fingerprint/service/platform/android/storage/storage.c
+index 675adec..58707fa 100644
+--- a/fingerprint/service/platform/android/storage/storage.c
++++ b/fingerprint/service/platform/android/storage/storage.c
+@@ -139,12 +139,14 @@ static uint32_t __storage_fs_write(const char *name, void *buf, uint32_t size)
+     }
+ 
+     //写入到源文件中。文件打开失败则表示新建文件
+-    fp = fopen(name, "w");
+-    if (fp == 0)
+-    {
+-        LOGE("file %s open fail",  name);
++    fp = fopen(name, "r+");
++    if(fp == 0){
++        fp = fopen(name, "w");
++        if (fp == 0)
++        {
++            LOGE("file %s open fail",  name);
++        }
+     }
+-
+     fwrite(buf, 1, size, fp);
+     fclose(fp);
+ 

@@ -1,0 +1,267 @@
+diff --git a/fingerprint/client/fingerprintso/fingerprint.c b/fingerprint/client/fingerprintso/fingerprint.c
+index 92fb035..a52d16f 100644
+--- a/fingerprint/client/fingerprintso/fingerprint.c
++++ b/fingerprint/client/fingerprintso/fingerprint.c
+@@ -171,8 +171,8 @@ fingerprint_module_t HAL_MODULE_INFO_SYM = {
+ 		.tag                = HARDWARE_MODULE_TAG,
+ 		.module_api_version = FINGERPRINT_MODULE_API_VERSION_2_0,
+ 		.hal_api_version    = HARDWARE_HAL_API_VERSION,
+-		.id                 = FINGERPRINT_HARDWARE_MODULE_ID,
+-//		.id                 = "microarray.fingerprint",
++//		.id                 = FINGERPRINT_HARDWARE_MODULE_ID,
++		.id                 = "microarray.fingerprint",
+ 		.name               = "Microarray Fingerprint HAL",
+ 		.author             = "Microarray",
+ 		.methods            = &fingerprint_module_methods,
+diff --git a/fingerprint/client/libfprint/include/globalvar.h b/fingerprint/client/libfprint/include/globalvar.h
+index c3e6f4a..f23cd36 100644
+--- a/fingerprint/client/libfprint/include/globalvar.h
++++ b/fingerprint/client/libfprint/include/globalvar.h
+@@ -26,6 +26,7 @@ enum fp_acquired_info {
+ 
+ extern int gNotCalibrated;
+ extern hw_auth_token_t *gHat;
++extern int gWorkState;
+ 
+ extern microarray_properties_t g_config;
+ extern int s_chip_id;
+diff --git a/fingerprint/client/libfprint/interface/ca_interface.c b/fingerprint/client/libfprint/interface/ca_interface.c
+index 43a5a8f..50c5acd 100644
+--- a/fingerprint/client/libfprint/interface/ca_interface.c
++++ b/fingerprint/client/libfprint/interface/ca_interface.c
+@@ -52,6 +52,13 @@ uint64_t bio_get_auth_id(void)
+ int bio_authenticate(uint64_t operation_id, uint32_t gid)
+ {
+     static struct cmd_auth_data cmd_auth = {0};
++    char storage_path[100];
++    LOGD("---gid = %d, active_group = %d, storage_path = %s\n", gid, g_config.active_group,g_config.storage_path);
++    if(gid != g_config.active_group){
++        snprintf(storage_path, 100,"/data/system/users/%d/fpdata",gid);
++        LOGD("--new storage_path = %s",storage_path);
++        bio_set_active_group(gid, storage_path);
++    }
+ 
+ #ifdef OEM_CHUANYIN
+     int chip_id = 0;
+@@ -124,7 +131,7 @@ int bio_cancel(void)
+ 
+ 	if (g_config.system_version == 7)
+     {
+-	    error_notify(FINGERPRINT_ERROR_CANCELED);
++        error_notify(FINGERPRINT_ERROR_CANCELED);
+ 	}
+ 
+ 	LOGD("end.\n");
+@@ -199,7 +206,13 @@ int bio_remove(uint32_t gid, uint32_t fid)
+     uint32_t fids[5];
+     memset(fids, 0, sizeof(fids));
+ 
+-    LOGD("gid 0x%x fid 0x%x\n", gid, fid);
++    char storage_path[100];
++    if(gid != g_config.active_group){
++        snprintf(storage_path, 100,"/data/system/users/%d/fpdata",gid);
++        LOGD("new storage_path = %s",storage_path);
++        bio_set_active_group(gid, storage_path);
++    }
++    LOGD("--gid = %d fid 0x%x, storage_path = %s\n", gid, fid, g_config.storage_path);
+ 
+     s_is_canceld = 0;
+     ret = ma_tac_remove(fid, fids, &len);
+@@ -301,13 +314,14 @@ int bio_set_active_group(uint32_t gid, const char *store_path)
+ {
+     //this path is for storage finger template
+     int len = strlen(store_path);
+-    LOGD("=====start, gid=0x%x store_path=%s. %d\n", gid, store_path, len);
++    LOGD("=======start, gid=0x%x store_path=%s. %d\n", gid, store_path, len);
+ 
+     s_is_canceld = 0;
+     if(len > sizeof(g_config.storage_path)) {
+         LOGE("store_path is too long.\n");
+         return FAIL;
+     }
++    cancel_cmd();
+     memcpy(g_config.storage_path, store_path, len);
+     g_config.storage_path[len] = '\0';
+     g_config.active_group = gid;
+diff --git a/fingerprint/client/libfprint/process/process.c b/fingerprint/client/libfprint/process/process.c
+index 5b5fdc3..05f64dc 100644
+--- a/fingerprint/client/libfprint/process/process.c
++++ b/fingerprint/client/libfprint/process/process.c
+@@ -25,7 +25,7 @@ struct cmd_entry g_cmd_tmp; //cmd entry stack
+ struct cmd_entry g_idle_cmd;
+ 
+ int g_factory_test = 0;
+-
++int gWorkState = 0;
+ /*将cmd编号转换成字符串输出
+  * @num cmd编号
+  */
+@@ -123,6 +123,9 @@ static void *fingerprint_hal_main_thread(void *p)
+         }
+         LOGD("Command %s is running\n", _num2string(qe->state));
+ 
++        gWorkState = qe->state;
++        LOGD("--gWorkState = %d ",gWorkState);
++
+         qe->cmd_process(qe);
+ 
+         if(sThreadExit){
+diff --git a/fingerprint/service/policy/policy.c b/fingerprint/service/policy/policy.c
+index c70df9a..c4a0de7 100644
+--- a/fingerprint/service/policy/policy.c
++++ b/fingerprint/service/policy/policy.c
+@@ -157,7 +157,7 @@ int policy_init_template(char* head, int fp_temp_size)
+ #endif
+ 		{
+ 			ret = policy_read_template(i, (void* )all_template[i]);
+-		    LOGD("-------all_template[%d].used=%d, all_template[%d].fid=%u", i, all_template[i]->used, i, all_template[i]->fid);
++		    LOGD("------all_template[%d].used=%d, all_template[%d].fid=%u", i, all_template[i]->used, i, all_template[i]->fid);
+ 		}
+ 	}
+ #ifdef PLATFORM_ANDROID
+@@ -187,6 +187,7 @@ static uint32_t get_index_with_fid(uint32_t fid)
+ {
+ 	int i = 0;
+ 	for (; i < FINGERPRINT_SIZE; i++) {
++        LOGD("get index with fid ----fid = %ld, all_template[%d]->fid=%ld",fid,i, all_template[i]->fid);
+ 		if (all_template[i]->used && all_template[i]->fid == fid) break;
+ 	}
+ 	return i;
+@@ -270,13 +271,13 @@ int policy_update_template_data(uint32_t fid,  void* para)
+ 	index = get_index_with_fid(fid);
+ 	if (FINGERPRINT_SIZE == index) return ERROR_FINGER_ID_NOT_EXIST;
+ 	memcpy(template_data_location[index], para, s_template_size - sizeof(struct fp_template_head));
+-	LOGD("fid=%u", fid);
++	LOGD("-fid=%u", fid);
+ 	return SUCCESS;
+ }
+ 
+ int policy_update_authenticate_data(void){
+ 	int index = get_index_with_fid(s_last_auth_fid);
+-	LOGD("fid=%d", s_last_auth_fid);
++	LOGD("-fid=%d", s_last_auth_fid);
+ 	if (FINGERPRINT_SIZE == index) return ERROR_FINGER_ID_NOT_EXIST;
+ 	return policy_write_template(index, (void* )all_template[index]);
+ }
+@@ -312,8 +313,8 @@ int policy_remove_finger(int fid, uint32_t *fid_array, int *len)
+ 		}
+ 	} else {
+ 		index = get_index_with_fid(fid);
+-		if (FINGERPRINT_SIZE == index) return -1;
+         LOGD("-index = %d ",index);
++		if (FINGERPRINT_SIZE == index) return -1;
+ 		all_template[index]->used = 0;
+ 		memset(template_data_location[index], 0, s_template_size - sizeof(struct fp_template_head));
+ 		ret = policy_write_template(index, (void* )all_template[index]);
+diff --git a/fingerprint/service/protocol/protocol.c b/fingerprint/service/protocol/protocol.c
+index 0181343..87b6595 100644
+--- a/fingerprint/service/protocol/protocol.c
++++ b/fingerprint/service/protocol/protocol.c
+@@ -65,7 +65,7 @@ static void protocol_service_init(protocol_service_init_t *data)
+ 
+ static void protocol_set_active_group(protocol_set_active_group_t *data) {
+ 
+-    LOGD("========== active group = %d, path=%s",
++    LOGD("==================== active group = %d, path=%s",
+                 data->request.config.active_group, data->request.config.storage_path);
+     if (data->request.config.active_group != g_config.active_group || 
+         strcmp(data->request.config.storage_path, g_config.storage_path))
+@@ -77,6 +77,7 @@ static void protocol_set_active_group(protocol_set_active_group_t *data) {
+         if(s_sensor != NULL)
+             policy_init_template(s_sensor->template_head, s_sensor->policy_data_size);
+ #else
++        LOGD("-------------------------protocol set active group-----------");
+             policy_init_template(s_sensor->template_head, s_sensor->policy_data_size);
+ #endif
+ 
+diff --git a/fingerprint/service/soft_sensor/sensor96/sensor_wrapper.c b/fingerprint/service/soft_sensor/sensor96/sensor_wrapper.c
+index 3cb9c64..8d096c9 100644
+--- a/fingerprint/service/soft_sensor/sensor96/sensor_wrapper.c
++++ b/fingerprint/service/soft_sensor/sensor96/sensor_wrapper.c
+@@ -20,6 +20,7 @@ static int s_update_flag = 1;
+ static struct fp_template template[FINGERPRINT_SIZE];
+ static int g_chip_id = 0;
+ static int sratio = 0;
++static int g_isenroll = 0;
+ 
+ typedef struct enroll_context {
+ 	uint32_t finger_id;
+@@ -425,8 +426,8 @@ static int algorithm96_authenticate(int *fid_count, uint32_t *fid)
+     policy_enumerate_fingerid(fidlist, &pre_len);
+     *fid_count = pre_len;
+     memset(max_data, 0, sizeof(g_enroll_ctx->test_template_data));
++    LOGD("---char_num = %d , fid_count = %d",char_num,fid_count);
+ 
+-match_again:
+     len = pre_len;
+     while ( len-- ) {
+         area = areaTH;
+@@ -450,24 +451,19 @@ match_again:
+ 
+     if(ret != 0) {
+         LOGD("score=%d, char_num=%d, matchArea=%d score_th=%d, temp_idx=%d, temp_num=%d ratio=%d isMult=%d\n",
+-             last_score, char_num, last_area, g_config.auth_score, last_temp_idx, last_temp_num, sratio, isMult);
++                last_score, char_num, last_area, g_config.auth_score, last_temp_idx, last_temp_num, sratio, isMult);
+         match_save_bmp(ret, char_num);
+         LOGD("match successfully.");
++        if(do_match_update(char_num, last_score, last_area, last_temp_num) ) { //更新模板
++            policy_update_template_data(fidlist[last_len], max_data);
++            temp_num = alg96_getState(max_data, TEMPLATE_NUM_A96);
++            LOGD("update template. tpl_count=%d\n", temp_num);
++        }
+     } else {
+-        if(isMult==1) {
+-            isMult = 0;
+-            goto match_again;
+-        } else if(count_down == 0) {
+             match_save_bmp(ret, char_num);
+             LOGD("score=%d, char_num=%d, matchArea=%d score_th=%d, ratio=%d\n",
+                 score, char_num, area, g_config.auth_score, sratio);
+             LOGD("match failed.");
+-        }
+-    }
+-    if(do_match_update(char_num, last_score, last_area, last_temp_num) ) { //更新模板
+-        policy_update_template_data(fidlist[last_len], max_data);
+-        temp_num = alg96_getState(max_data, TEMPLATE_NUM_A96);
+-        LOGD("update template. tpl_count=%d\n", temp_num);
+     }
+     memset(max_data, 0, sizeof(g_enroll_ctx->test_template_data));
+ 
+@@ -524,6 +520,7 @@ static int algorithm96_enroll(void) {
+     unsigned char *enroll_image = (unsigned char *)context_get_img_buf();
+ 
+     s_update_flag = 0;
++	g_isenroll = 1;
+     fp96_remove_bkg(g_chip_id, g_enroll_ctx->max_image, context_get_sensor96_bkg(), enroll_image,
+     		g_enroll_ctx->proc_buf, g_enroll_ctx->grey_offset);
+     memcpy(g_auth_ctx->remove_bkg_img, enroll_image, IMAGE_SIZE);
+@@ -560,7 +557,7 @@ static int algorithm96_enroll(void) {
+             return ERROR_ENROLL_PART_TOUCH;
+         } else {
+             LOGD("end. duplicate area.");
+-            return ERROR_ENROLL_DUPLICATE_AREA;
++            //return ERROR_ENROLL_DUPLICATE_AREA;
+         }
+     } else {
+         if(g_init_enroll == 1) g_init_enroll = 0;
+@@ -585,6 +582,7 @@ static int algorithm96_enroll_finish(void) {
+  *          FAIL:失败
+  */
+ static int algorithm96_enroll_cancel(void) {
++	g_isenroll = 0;
+     return policy_enroll_cancel();
+ }
+ 
+diff --git a/version/test.csv b/version/test.csv
+index 415e1df..c4fe745 100644
+--- a/version/test.csv
++++ b/version/test.csv
+@@ -31,7 +31,7 @@ Default,Android,4.0.00,A80_T,Android,armeabi arm64-v8a,Android5.1,Yes,Yes,Yes,No
+ Default,Android,4.0.00,A96_N,Android,armeabi arm64-v8a,Android5.1,Yes,Yes,Yes,No,14,3
+ Default,Android,4.0.00,A120_T,Android,armeabi arm64-v8a,Android5.1,Yes,Yes,Yes,No,14,3
+ Default,Android,4.0.00,A120_T,Android,armeabi arm64-v8a,Android6.0,Yes,Yes,Yes,No,14,3
+-Default,Android,4.0.00,A96_N,Trustkernel,arm64-v8a,Android6.0,Yes,Yes,Yes,No,14,3
++Default,Android,4.0.00,A96_N,Trustkernel,arm64-v8a armeabi,Android6.0,Yes,Yes,Yes,No,14,3
+ Default,Android,4.0.00,A120_N,Microtrust,armeabi arm64-v8a,Android6.0,Yes,Yes,Yes,No,14,3
+ Default,Android,4.0.00,A96_N,Microtrust,arm64-v8a,Android6.0,Yes,Yes,Yes,No,14,3
+ Default,Android,4.0.00,A96_N,Trustonic,armeabi,Android6.0,Yes,Yes,Yes,No,14,3

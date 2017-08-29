@@ -1,0 +1,28 @@
+diff --git a/fingerprint/service/platform/android/storage/storage.c b/fingerprint/service/platform/android/storage/storage.c
+index 8d15065..c81a3b2 100644
+--- a/fingerprint/service/platform/android/storage/storage.c
++++ b/fingerprint/service/platform/android/storage/storage.c
+@@ -108,7 +108,11 @@ static uint32_t __storage_fs_write(const char *name, void *buf, uint32_t size)
+         LOGE("file %s open fail",  name);
+     }
+ 
+-    fwrite(buf, 1, size, fp);
++    if(NULL==buf){
++        LOGD("==buf is NULL\n");
++    }else{
++        fwrite(buf, 1, size, fp);
++    }
+     fclose(fp);
+ 
+     return SUCCESS;
+diff --git a/version/test.csv b/version/test.csv
+index 6b208ee..6c921af 100644
+--- a/version/test.csv
++++ b/version/test.csv
+@@ -1,5 +1,5 @@
+ Product,OEM,Version,Support Sensor,Platform,APP ABI,Operation System,Enable Navigation,Return After Authenticate,Filter Duplicate Enroll,Filter Part Touch Enroll,Enroll Times,Auth Retry Times
+-Default,Android,4.0.00,A121_N,Android,arm64-v8a,Android6.0,Yes,Yes,Yes,No,14,3
++Default,Android,4.0.00,A121_N,Android,arm64-v8a armeabi,Android6.0,Yes,Yes,Yes,No,14,3
+ Default,Android,4.0.00,A96_N&A112UM_N,Android,arm64-v8a,Android6.0,Yes,Yes,Yes,No,14,3
+ Default,Android,4.0.00,A121_N,Android,armeabi,Android6.0,Yes,Yes,Yes,No,14,3
+ Default,Android,4.0.00,A96_N&A112UM_N,Android,armeabi,Android6.0,Yes,Yes,Yes,No,14,3

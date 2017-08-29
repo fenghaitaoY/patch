@@ -1,0 +1,139 @@
+diff --git a/fingerprint/client/fingerprintso/fingerprint.c b/fingerprint/client/fingerprintso/fingerprint.c
+index 0e310ce..fbd0b64 100644
+--- a/fingerprint/client/fingerprintso/fingerprint.c
++++ b/fingerprint/client/fingerprintso/fingerprint.c
+@@ -172,8 +172,8 @@ fingerprint_module_t HAL_MODULE_INFO_SYM = {
+ 		.tag                = HARDWARE_MODULE_TAG,
+ 		.module_api_version = FINGERPRINT_MODULE_API_VERSION_2_0,
+ 		.hal_api_version    = HARDWARE_HAL_API_VERSION,
+-		.id                 = FINGERPRINT_HARDWARE_MODULE_ID,
+-//		.id                 = "microarray.fingerprint",
++//		.id                 = FINGERPRINT_HARDWARE_MODULE_ID,
++		.id                 = "microarray.fingerprint",
+ 		.name               = "Microarray Fingerprint HAL",
+ 		.author             = "Microarray",
+ 		.methods            = &fingerprint_module_methods,
+diff --git a/fingerprint/client/libfprint/include/globalvar.h b/fingerprint/client/libfprint/include/globalvar.h
+index c3e6f4a..320d7f4 100644
+--- a/fingerprint/client/libfprint/include/globalvar.h
++++ b/fingerprint/client/libfprint/include/globalvar.h
+@@ -30,7 +30,7 @@ extern hw_auth_token_t *gHat;
+ extern microarray_properties_t g_config;
+ extern int s_chip_id;
+ extern unsigned int g_driver_version;
+-
++extern int is_enrolling;
+ #ifdef TAC_DEBUG_SAVE_FILE
+ extern int g_auth_num;
+ extern int g_auth_image_num;
+diff --git a/fingerprint/client/libfprint/interface/ca_interface.c b/fingerprint/client/libfprint/interface/ca_interface.c
+index 43a5a8f..180fe3b 100644
+--- a/fingerprint/client/libfprint/interface/ca_interface.c
++++ b/fingerprint/client/libfprint/interface/ca_interface.c
+@@ -27,7 +27,7 @@ microarray_properties_t g_config;
+ static int s_is_canceld = 0; //for duplicate cancel detect
+ static int is_init = 0;
+ int s_chip_id = 0;
+-
++int is_enrolling = 0;
+ ////////////////////////////////////////////////////////////////
+ 
+ int bio_command(uint32_t cmd, uint32_t arg)
+@@ -171,6 +171,7 @@ int bio_enroll(uint32_t gid, uint32_t timeout_sec,const hw_auth_token_t *token)
+     // warning const set to unconst
+     cmd_enrollcalibrate.token = token;
+     enqueue_cmd(enrollcalibrate_work, (void*)&cmd_enrollcalibrate, PROCESS_ENROLLCALIBRATE);
++    is_enrolling = 1;
+     LOGD("end.\n");
+ 
+     return 0;
+@@ -182,7 +183,10 @@ int bio_enroll(uint32_t gid, uint32_t timeout_sec,const hw_auth_token_t *token)
+ int bio_post_enroll(void)
+ {
+     s_is_canceld = 0;
+-    cancel_cmd_for_post_enroll();
++    if(is_enrolling == 0){
++        LOGD("-----------post enroll------");
++        cancel_cmd_for_post_enroll();
++    }
+     return 0;
+ }
+ 
+diff --git a/fingerprint/client/libfprint/process/authenticate.c b/fingerprint/client/libfprint/process/authenticate.c
+index b11f1f5..d2c6219 100644
+--- a/fingerprint/client/libfprint/process/authenticate.c
++++ b/fingerprint/client/libfprint/process/authenticate.c
+@@ -63,14 +63,14 @@ static int verify(struct cmd_entry *qe)
+         }
+ #endif
+ 
+-#if (defined(PLATFORM_YUNOS) || defined(OEM_YUNOS))
++//#if (defined(PLATFORM_YUNOS) || defined(OEM_YUNOS))
+ 		if(	gAuthCount == g_config.auth_retry_times) {
+ 			LOGD("yunso finger down");
+ 			acquired_event_notify(FINGERPRINT_ACQUIRED_FINGER_DOWN);
+ 			LOGD("yunso finger up");
+ 			acquired_event_notify(FINGERPRINT_ACQUIRED_FINGER_UP);
+ 		}
+-#endif
++//#endif
+ 		ret = ma_tac_do_verify(&fid_count, &fid, gAuthCount, gHat);
+ 		if (ret == ERROR_WET_FINGER) {
+ 			LOGE("wet finger");
+diff --git a/fingerprint/client/libfprint/process/enrollcalibrate.c b/fingerprint/client/libfprint/process/enrollcalibrate.c
+index 5a3957b..9e195e8 100644
+--- a/fingerprint/client/libfprint/process/enrollcalibrate.c
++++ b/fingerprint/client/libfprint/process/enrollcalibrate.c
+@@ -95,6 +95,7 @@ void* enrollcalibrate_work(void * q)
+                         if (percentage <= 0) {
+                             //TODO if enroll finish isn't ok
+                             ma_tac_enroll_finish();//存模板
++                            is_enrolling = 0;
+ 							finish = 1;
+                         } else {
+                         	percentage -= 1;
+@@ -115,6 +116,7 @@ void* enrollcalibrate_work(void * q)
+ 							if (percentage <= 0) {
+ 								//TODO if enroll finish isn't ok
+ 								ma_tac_enroll_finish();//存模板
++                                is_enrolling = 0;
+ 								finish = 1;
+ 							} else {
+ 								percentage -= 1;
+diff --git a/fingerprint/client/libfprint/process/navigate.c b/fingerprint/client/libfprint/process/navigate.c
+index 7016f07..d21fca7 100644
+--- a/fingerprint/client/libfprint/process/navigate.c
++++ b/fingerprint/client/libfprint/process/navigate.c
+@@ -29,15 +29,15 @@ static int report_navi_result(uint32_t navi_result) {
+         dc_send_cmd(MA_KEY_DOWN);
+         LOGD("report event NAVI DOWN");
+     }else if (navi_result & NAVI_TAP_DOWN) {
+-#ifdef PLATFORM_YUNOS
++//#ifdef PLATFORM_YUNOS
+         acquired_event_notify(FINGERPRINT_ACQUIRED_FINGER_DOWN);
+-#endif
++//#endif
+         dc_send_cmd(TAP_DOWN);
+         LOGD("report event NAVI TAP_DOWN");
+     }else if (navi_result & NAVI_TAP_UP) {
+-#ifdef PLATFORM_YUNOS
++//#ifdef PLATFORM_YUNOS
+         acquired_event_notify(FINGERPRINT_ACQUIRED_FINGER_UP);
+-#endif
++//#endif
+         dc_send_cmd(TAP_UP);
+         LOGD("report event NAVI TAP UP");
+     }
+diff --git a/fingerprint/service/soft_sensor/sensor83/sensor_wrapper.c b/fingerprint/service/soft_sensor/sensor83/sensor_wrapper.c
+index 00a0f16..3fb98dc 100644
+--- a/fingerprint/service/soft_sensor/sensor83/sensor_wrapper.c
++++ b/fingerprint/service/soft_sensor/sensor83/sensor_wrapper.c
+@@ -603,6 +603,8 @@ match_again:
+  */
+ static int algorithm83_enroll_start(uint64_t user_id) {
+ 	int ret;
++
++	fp83_reset_mode();
+ 	g_enroll_ctx->max_count = 0;
+ 	memset(g_enroll_ctx->max_image, 0, sizeof(g_enroll_ctx->max_image));
+ 	memset(g_enroll_ctx->template_data, 0, sizeof(g_enroll_ctx->template_data));
