@@ -1,0 +1,84 @@
+diff --git a/fingerprint/client/libfprint/process/navigate.c b/fingerprint/client/libfprint/process/navigate.c
+index bbe4b12..579a3f7 100644
+--- a/fingerprint/client/libfprint/process/navigate.c
++++ b/fingerprint/client/libfprint/process/navigate.c
+@@ -105,14 +105,15 @@ void * navigate_work(void *q)
+             tap_result = ma_tac_navigate_tap(tap_result);
+             // LOGD(" tap result = %d", tap_result);
+             if (down_count == 0 && (tap_result & NAVI_TAP_DOWN)) {
+-                report_navi_result(NAVI_TAP_DOWN);
+-                report_navi_result(NAVI_SINGLE_TAP);
++                //report_navi_result(NAVI_TAP_DOWN);
++                //report_navi_result(NAVI_SINGLE_TAP);
+                 gettimeofday(&now_tap_time,NULL);
+                 tap_down_time = now_tap_time.tv_sec * 1000 + now_tap_time.tv_usec / 1000;
+                 need_report_long_tap = 1;
+             }
+ 
+             if (tap_result & NAVI_TAP_UP) {
++                report_navi_result(NAVI_TAP_DOWN);
+                 report_navi_result(NAVI_TAP_UP);
+             }
+ 
+@@ -149,7 +150,7 @@ void * navigate_work(void *q)
+         }
+         LOGD("down_count = %d", down_count);
+         navi_result = ma_tac_navigate_direction();
+-        report_navi_result(navi_result);
++        //report_navi_result(navi_result);
+         if ( qe->cancelled ) {
+             LOGD("command cancelled\n");
+             return NULL;
+@@ -170,7 +171,7 @@ void * navigate_work(void *q)
+             }
+ 
+             if (tap_result & NAVI_TAP_UP) {
+-                report_navi_result(NAVI_TAP_UP);
++                //report_navi_result(NAVI_TAP_UP);
+                 need_report_long_tap = 0;
+             }
+             if ( qe->cancelled ) {
+@@ -215,7 +216,7 @@ void * tap_work_active(void *q)
+         while(1) {
+             if ( report_flag == 0 ) {
+                 LOGD("tap down");
+-                report_navi_result(NAVI_TAP_DOWN);
++                //report_navi_result(NAVI_TAP_DOWN);
+                 report_flag = 1;
+             }
+             ma_tac_sleep();
+@@ -235,7 +236,7 @@ void * tap_work_active(void *q)
+             } else if( interrupt_status == 0 ) {
+                 report_flag = 0;
+                 LOGD("tap up");
+-                report_navi_result(NAVI_TAP_UP);
++                //report_navi_result(NAVI_TAP_UP);
+                 s_interrupt_error_trigger_count=0;
+                 dc_send_cmd(SLEEP);
+                 if ( qe->cancelled ) {
+diff --git a/fingerprint/service/soft_sensor/sensor83/algorithm/detect.c b/fingerprint/service/soft_sensor/sensor83/algorithm/detect.c
+index 8fa27e3..9b71c8b 100644
+--- a/fingerprint/service/soft_sensor/sensor83/algorithm/detect.c
++++ b/fingerprint/service/soft_sensor/sensor83/algorithm/detect.c
+@@ -16,7 +16,7 @@ int fp83_press_detect( int *imgRaw, int *imgBkg, unsigned char grey_offset )
+     int TH, count;
+     int val = ((unsigned int)grey_offset << 4) | 0x0f;
+     count = 0;
+-    TH = 100;
++    TH = 70;
+     for ( j = 4; j < 124; j++ ) {
+         for ( i = 4; i < 76; i++ ) {
+             count += ( ( (imgRaw + j*80)[i] - (imgBkg + j*80)[i] ) > TH ) ? 1 : 0;
+diff --git a/fingerprint/service/soft_sensor/sensor83/sensor_wrapper.c b/fingerprint/service/soft_sensor/sensor83/sensor_wrapper.c
+index 94a9ecf..618ffc2 100644
+--- a/fingerprint/service/soft_sensor/sensor83/sensor_wrapper.c
++++ b/fingerprint/service/soft_sensor/sensor83/sensor_wrapper.c
+@@ -415,7 +415,7 @@ match_again:
+ 	} else {
+ 		if (isMult == 1) {
+ 			isMult = 0;
+-			goto match_again;
++		//	goto match_again;
+ 		} else if(count_down==0) { //最后一次尝试失败打印
+ 			match_save_bmp(ret, char_num);
+ 			LOGD("score=%d, char_num=%d, matchArea=%d score_th=%d, ratio=%d\n",

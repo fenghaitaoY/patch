@@ -1,0 +1,151 @@
+diff --git a/fingerprint/client/libfprint/process/authenticate.c b/fingerprint/client/libfprint/process/authenticate.c
+index bda1541..fa097e3 100644
+--- a/fingerprint/client/libfprint/process/authenticate.c
++++ b/fingerprint/client/libfprint/process/authenticate.c
+@@ -20,6 +20,9 @@ int upflag = 1;
+ static int s_report_flag = 1;
+ extern microarray_properties_t g_config;
+ 
++struct timespec g_check_time, g_check_end_time;
++long s_press_times=0;
++
+ /*执行验证工作
+  * @qe 任务队列元素
+  * @return: 0:取消，验证成功后手指离开
+@@ -143,12 +146,35 @@ void* authenticate_work(void *q)
+ 	context_get_interrupt_calibrated(&calibrated);
+     LOGD("calibrated=%d", calibrated);
+ 
++    ma_tac_spi_test();
++
++    clock_gettime(CLOCK_BOOTTIME, &g_check_end_time);
++    g_check_time.tv_sec = g_check_end_time.tv_sec;
++    g_check_time.tv_nsec = g_check_end_time.tv_nsec;
++
+ 	while (1) {
+ 		LOGD("loopstart");
+ 	    gAuthCount = g_config.auth_retry_times;
+ 		r = ma_tac_detect_touch();
++        if(r == NORMAL_PRESSED){
++            clock_gettime(CLOCK_BOOTTIME, &g_check_end_time);
++            g_check_time.tv_sec = g_check_end_time.tv_sec;
++            g_check_time.tv_nsec = g_check_end_time.tv_nsec;
++        }
++
++
+         LOGD(" tac detect touch , r = %d\n",r);
+ 		if (r == NORMAL_UNPRESSED) {
++			clock_gettime(CLOCK_BOOTTIME, &g_check_end_time);
++            s_press_times = (g_check_end_time.tv_sec - g_check_time.tv_sec) * 1000 +
++                (g_check_end_time.tv_nsec - g_check_time.tv_nsec)/1000000;
++            LOGD("fht s_press_times = %ld", s_press_times);
++            if(s_press_times <5000){
++                if(qe->cancelled){
++                    return 0;
++                }
++                continue;
++            }
+ 			ma_tac_sleep();
+ 			//TODO  change the logic/
+ 			LOGD("go to kernel\n");
+diff --git a/fingerprint/client/libfprint/process/refresh.c b/fingerprint/client/libfprint/process/refresh.c
+index 6a4584d..eeabd82 100644
+--- a/fingerprint/client/libfprint/process/refresh.c
++++ b/fingerprint/client/libfprint/process/refresh.c
+@@ -28,7 +28,7 @@ void handler(int sig) {
+         pop_cmd_leave_factory_test();
+     }
+     signal(SIGALRM, pfunc);
+-    alarm(60 * 5);//10min
++    alarm(30 * 1);//10min
+     LOGD("end.\n");
+ }
+ 
+diff --git a/fingerprint/service/soft_sensor/sensor120/algorithm/detect.c b/fingerprint/service/soft_sensor/sensor120/algorithm/detect.c
+index d5bcfab..0869b61 100644
+--- a/fingerprint/service/soft_sensor/sensor120/algorithm/detect.c
++++ b/fingerprint/service/soft_sensor/sensor120/algorithm/detect.c
+@@ -178,7 +178,7 @@ static int afs120_setWakeUpTH(uint8_t* imgBuf, uint8_t* th_t, uint8_t* th_c, uin
+ 	for (i = 0; i < 256; i++) {
+ 		histPxl[i] = 0;
+ 	}
+-	for (i = 0; i < 480; i++) {
++	for (i = 0; i < 120; i++) {
+ 		histPxl[imgBuf[i]]++;
+ 	}
+ 	maxDif = 0;
+@@ -193,7 +193,7 @@ static int afs120_setWakeUpTH(uint8_t* imgBuf, uint8_t* th_t, uint8_t* th_c, uin
+ 	if (tmpTHT == 0) return 0;
+ 
+ 	tmpTHC = 0;
+-	for (i = 0; i < 480; i++) {
++	for (i = 0; i < 120; i++) {
+ 		if (imgBuf[i] > tmpTHT)	tmpTHC++;
+ 	}
+ 	*th_c = tmpTHC >> 1;
+diff --git a/fingerprint/service/soft_sensor/sensor120/sensor_120.c b/fingerprint/service/soft_sensor/sensor120/sensor_120.c
+index abe6f0b..d10c700 100644
+--- a/fingerprint/service/soft_sensor/sensor120/sensor_120.c
++++ b/fingerprint/service/soft_sensor/sensor120/sensor_120.c
+@@ -189,7 +189,7 @@ int fp120_detect_mode(void) {
+ 
+ 	context_get_sensor120_interrupt_param(&t, &c);
+ 	context_get_sensor120_volt_d_param(&d_volt);
+-	fp120_detect_mode_parameters(0x3c, 0x3c, 0x3d, 0x02, 0x02, d_volt, t, c, 0x18);
++	fp120_detect_mode_parameters(0x3c, 0x3c, 0x3d, 0x02, 0x01, d_volt, t, c, 0x18);
+ 	LOGD("t = 0x%x, c = 0x%x\n", t, c);
+ 
+ 	return SUCCESS;
+@@ -261,7 +261,7 @@ int fp120_calc_interrupt_parameters(void) {
+ 
+ 	context_get_sensor120_volt_d_param(&dvolt);
+ 	for (i = 0; i < 4; i++) {
+-		fp120_detect_mode_parameters(0x3c, 0x3c, 0x3d, 0x02, 0x02, dvolt, 0, 0, 0x18);
++		fp120_detect_mode_parameters(0x3c, 0x3c, 0x3d, 0x02, 0x01, dvolt, 0, 0, 0x18);
+ 		platform_msleep(40);
+ 		fp120_capture_mode();
+ 		//sensor_read_line(line + i * 120, 120);
+@@ -273,7 +273,7 @@ int fp120_calc_interrupt_parameters(void) {
+ 		ret = fp120_fullImage(out, g_config.detect_threshold, &rWeight, &rTH);
+ 		if (ret == 1) break;
+ 
+-		if (i == 3) {
++		if (i == 0) {
+ 			context_get_sensor120_grey_s_param(&start);
+ 			context_get_sensor120_grey_e_param(&end);
+ 			fp120_setWakeUpTH(line, &para_t, &para_c, start, end, s_para_delta);
+@@ -331,10 +331,10 @@ int fp120_deadpix_factory_test(void) {
+ 		}
+ 		if (tmp < 0)
+ 			tmp = 0;
+-		if (tmp < 8 || tmp > 40)
++		if (tmp < 4 || tmp > 130)
+ 			counts++;
+ 	}
+-	if (counts > 120) {
++	if (counts > 140) {
+ 		ret = ERROR_DEADPIX_TEST_FAIL;
+ 	} else {
+ 		ret = SUCCESS;
+@@ -367,7 +367,7 @@ int fp120_interrupt_factory_test(void) {
+ 	int d_volt;
+ 
+ 	context_get_sensor120_volt_d_param(&d_volt);
+-	fp120_detect_mode_parameters(0x3c, 0x3c, 0x3d, 0x02, 0x02, d_volt, 0, 0, 0x18);
++	fp120_detect_mode_parameters(0x3c, 0x3c, 0x3d, 0x02, 0x01, d_volt, 0, 0, 0x18);
+ 	platform_msleep(100);
+ 	sensor_set_register(MA_CAPTURE_MODE, 0xff);
+ 	platform_msleep(3);
+diff --git a/fingerprint/service/soft_sensor/sensor120/sensor_wrapper.c b/fingerprint/service/soft_sensor/sensor120/sensor_wrapper.c
+index fdc0e98..04281eb 100644
+--- a/fingerprint/service/soft_sensor/sensor120/sensor_wrapper.c
++++ b/fingerprint/service/soft_sensor/sensor120/sensor_wrapper.c
+@@ -251,7 +251,7 @@ static int sensor120_create(microarray_properties_t *config) {
+ 	context_get_sensor120_param_calibrated(&calibrated);
+ 	LOGD("### calibrated = %d", calibrated);
+ 	if (SENSOR_CALIBRATED != calibrated) {
+-		ret = fp120_calc_init_parameters();
++		ret = sensor120_calc_init_parameters();
+ 	}
+ 
+ 	context_get_sensor120_interrupt_calibrated(&g_config.ma_ctx.interrupt_calibrated);

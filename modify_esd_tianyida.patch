@@ -55,3 +55,20 @@ index 83dd0fe..874442e 100644
  			if ( qe->cancelled ) {
  				LOGD("command cancelled\n");
  				return 0;
+diff --git a/fingerprint/service/malib/Android.mk b/fingerprint/service/malib/Android.mk
+index acf8e06..825bfbf 100644
+--- a/fingerprint/service/malib/Android.mk
++++ b/fingerprint/service/malib/Android.mk
+@@ -12,9 +12,9 @@ LOCAL_SRC_FILES := \
+ 	utils/mastring.c \
+ 	utils/malog.c \
+ 	utils/masnprintf.c \
+-	utils/masqrt.c
+-	#utils/bitmap.c\
+-	#pgm/pgm.c
++	utils/masqrt.c \
++	utils/bitmap.c\
++	pgm/pgm.c
+ 
+ LOCAL_MODULE := malib
+ 
