@@ -1,0 +1,688 @@
+diff --git a/fingerprint/client/libfprint/interface/ca_interface.c b/fingerprint/client/libfprint/interface/ca_interface.c
+index 7d94495..94ac66a 100644
+--- a/fingerprint/client/libfprint/interface/ca_interface.c
++++ b/fingerprint/client/libfprint/interface/ca_interface.c
+@@ -321,6 +321,7 @@ int bio_close(void)
+     gHat = NULL;
+     stop_process();
+     stop_process_extern_msg();
++    refresh_stop();
+     if(g_config.cover_type == COVER_S3 && g_config.sid03_key_func == 1) {
+         stop_process_sid03_interrupt();
+     }
+diff --git a/fingerprint/client/libfprint/process/authenticate.c b/fingerprint/client/libfprint/process/authenticate.c
+index 7aa5802..561b315 100644
+--- a/fingerprint/client/libfprint/process/authenticate.c
++++ b/fingerprint/client/libfprint/process/authenticate.c
+@@ -67,7 +67,8 @@ static int verify(struct cmd_entry *qe)
+ #endif
+ 		ret = ma_tac_do_verify(&fid_count, &fid, gAuthCount, gHat);
+ 		if (ret == ERROR_WET_FINGER) {
+-			LOGE("wet finger");
++			LOGE("-------- fht -------wet finger");
++            return 0;
+ 		}else if (ret != 0) {
+ 			LOGE("do_verify call function failed\n");
+ 			return 0;
+@@ -80,10 +81,10 @@ static int verify(struct cmd_entry *qe)
+ #ifdef OEM_CHUANYIN
+         if(fid) s_report_flag = 0;
+ #endif
+-		r = ma_tac_detect_touch();
++		r = ma_tac_detect_touch(AUTHENTICATE_DETECT);
+ 		LOGD("detect_touch ret=%d", r);
+ 
+-		if (r == NORMAL_UNPRESSED) break;
++		if (r == NORMAL_UNPRESSED || r == ERROR_EXTRACT_FAIL) break;
+ 
+ 	} while(gAuthCount-- > 0 && !fid);
+ 
+@@ -99,7 +100,7 @@ static int verify(struct cmd_entry *qe)
+ 	    authenticate_notify(cmd_auth->gid, fid, gHat);
+ 	}
+ #else
+-	if (!fid && fid_count) {
++	if (!fid && fid_count && r!=ERROR_EXTRACT_FAIL) {
+ 		dc_send_cmd(TIMEOUT_WAKELOCK);
+ 		authenticate_notify(cmd_auth->gid, fid, gHat);
+ 	}
+@@ -111,9 +112,11 @@ static int verify(struct cmd_entry *qe)
+ 	while (1) {
+ 		if ( qe->cancelled ) {
+ 			LOGD("command cancelled\n");
+-			return 0;
++//			return 0;
+ 		}
+-	    down = ma_tac_detectTouch_getEnergy();
++	    //down = ma_tac_detectTouch_getEnergy();
++        down = ma_tac_detect_touch(AUTHENTICATE_DETECT);
++        LOGD("down = %d ",down);
+ 	    if(down < 0) {
+ 	        error_notify(FINGERPRINT_ERROR_HW_UNAVAILABLE);
+ 	        break;
+@@ -147,6 +150,8 @@ void* authenticate_work(void *q)
+ 	int r = 0;
+ 	int count = 0;
+ 	int cancelflag = 0;
++	const int ERROR_IMAGE_COUNT = 4;
++	static int s_error_image_count = 0;//连续ERROR_IMAGE_COUNT次采图失败，则上报退出验证流程
+ 	static int s_interrupt_error_trigger_count;
+ 	struct cmd_entry *qe = (struct cmd_entry *) q;
+ 	struct cmd_auth_data *cmd_auth = (struct cmd_auth_data *) qe->parameter;
+@@ -160,34 +165,26 @@ void* authenticate_work(void *q)
+ 	context_get_interrupt_calibrated(&calibrated);
+     LOGD("calibrated=%d", calibrated);
+ 
+-	int detect_touch_error;
++    ma_tac_spi_test();
+ 	while (1) {
+ 		LOGD("loopstart");
+ 	    gAuthCount = g_config.auth_retry_times;
+-		r = ma_tac_detect_touch_121(&detect_touch_error);
+-		//r = ma_tac_detect_touch();		
+-		if(detect_touch_error == ERROR_WET_FINGER) {
+-			s_interrupt_error_trigger_count = 0;
+-			LOGD("detect_touch_error == ERROR_WET_FINGER, s_interrupt_error_trigger_count = 0\n");
+-		}
++		r = ma_tac_detect_touch(AUTHENTICATE_DETECT);
+         LOGD(" tac detect touch , r = %d\n",r);
+ 		if (r == NORMAL_UNPRESSED) {
++		    s_error_image_count = 0;
+ 			ma_tac_sleep();
+ 			//TODO  change the logic/
+ 			LOGD("go to kernel\n");
+-			dc_sleep_fingerprint();
++            dc_sleep_fingerprint();
+ 			if ( qe->cancelled ) {
+ 				LOGD("command cancelled\n");
+ 				return 0;
+ 			}
+-            r = ma_tac_detect_touch_121(&detect_touch_error);
+-			if(detect_touch_error == ERROR_WET_FINGER) {
+-				s_interrupt_error_trigger_count = 0;
+-				LOGD("detect_touch_error == ERROR_WET_FINGER, s_interrupt_error_trigger_count = 0\n");
+-			}
+-			//r = ma_tac_detect_touch();
++            r = ma_tac_detect_touch(AUTHENTICATE_DETECT);
+             LOGD(" tac detect touch , sec r=%d \n",r);
+ 			if (r == NORMAL_UNPRESSED) {
++			    s_error_image_count = 0;
+ 	            s_interrupt_error_trigger_count++;
+ 		        if( s_interrupt_error_trigger_count > 30 )
+ 		        {
+@@ -203,8 +200,15 @@ void* authenticate_work(void *q)
+ 			    continue;
+ 			} else if(r < 0) {
+ 			    LOGE("sensor error");
+-			    return NULL;
++			    s_error_image_count++;
++			    usleep(s_error_image_count * 1000);
++			    if (s_error_image_count >= ERROR_IMAGE_COUNT) {
++			        s_error_image_count = 0;
++			        return NULL;
++			    }
++			    continue;
+ 			} else {
++			    s_error_image_count = 0;
+                 s_interrupt_error_trigger_count=0;
+ //#if (defined(PLATFORM_YUNOS) || defined(OEM_YUNOS))
+ //			    acquired_event_notify(FINGERPRINT_ACQUIRED_FINGER_DOWN);
+@@ -213,8 +217,15 @@ void* authenticate_work(void *q)
+ 
+ 		} else if(r < 0) {
+ 		    LOGE("sensor error");
+-		    return NULL;
++		    s_error_image_count++;
++		    usleep(s_error_image_count * 1000);
++		    if (s_error_image_count > ERROR_IMAGE_COUNT) {
++		        s_error_image_count = 0;
++		        return NULL;
++		    }
++		    continue;
+ 		} else {
++		    s_error_image_count = 0;
+ 		    s_interrupt_error_trigger_count=0;
+ //#if (defined(PLATFORM_YUNOS) || defined(OEM_YUNOS))
+ //		    acquired_event_notify(FINGERPRINT_ACQUIRED_FINGER_DOWN);
+diff --git a/fingerprint/client/libfprint/process/enrollcalibrate.c b/fingerprint/client/libfprint/process/enrollcalibrate.c
+index 1d26108..d96facf 100644
+--- a/fingerprint/client/libfprint/process/enrollcalibrate.c
++++ b/fingerprint/client/libfprint/process/enrollcalibrate.c
+@@ -82,11 +82,11 @@ void* enrollcalibrate_work(void * q)
+                 } else {
+                     if (ma_tac_do_enroll(&ret, token)) {
+                         LOGE("bio_do_enroll failed\n");
+-                        if ( qe->cancelled ) {
+-                            LOGD("command cancelled\n");
+-                            cancelflag = 1;
+-                            break;
+-                        }
++                    }
++                    if ( qe->cancelled ) {
++                        LOGD("command cancelled\n");
++                        cancelflag = 1;
++                        break;
+                     }
+                     if (ret == 0 || (ret == ERROR_ENROLL_DUPLICATE_AREA 
+                         && g_config.enroll_times - percentage < g_config.enroll_times / 2 - 1 )) {
+@@ -187,7 +187,7 @@ void* enrollcalibrate_work(void * q)
+         if ( !cancelflag ) {
+             //enroll calibrated get par
+             while (count--) {
+-                if ( ma_tac_detect_touch() == NORMAL_PRESSED) {
++                if ( ma_tac_detect_touch(PRESS_DETECT) == NORMAL_PRESSED) {
+                     count = 4;
+                     if ( qe->cancelled ) {
+                         LOGD("command cancelled\n");
+diff --git a/fingerprint/client/libfprint/process/navigate.c b/fingerprint/client/libfprint/process/navigate.c
+index 6a4651e..2477f01 100644
+--- a/fingerprint/client/libfprint/process/navigate.c
++++ b/fingerprint/client/libfprint/process/navigate.c
+@@ -149,7 +149,7 @@ void * navigate_work(void *q)
+         if( s_interrupt_error_trigger_count > 30 )
+         {
+             LOGD("need reset int paras");
+-            if ( ma_tac_detect_touch() == NORMAL_UNPRESSED ) {
++            if ( ma_tac_detect_touch(PRESS_DETECT) == NORMAL_UNPRESSED ) {
+ 
+                 LOGD("reset int paras");
+                 ma_tac_reset_interrupt_para();
+@@ -263,7 +263,7 @@ void * tap_work_active(void *q)
+             }
+             if( s_interrupt_error_trigger_count > 30 ) {
+                 LOGE("need reset int paras");
+-                if(ma_tac_detect_touch() == NORMAL_UNPRESSED) {
++                if(ma_tac_detect_touch(PRESS_DETECT) == NORMAL_UNPRESSED) {
+                     LOGE("reset int paras");
+                     ma_tac_reset_interrupt_para();
+                     ma_tac_calc_interrupt_para();
+diff --git a/fingerprint/client/libfprint/process/process.c b/fingerprint/client/libfprint/process/process.c
+index 74793b7..1f18bd2 100644
+--- a/fingerprint/client/libfprint/process/process.c
++++ b/fingerprint/client/libfprint/process/process.c
+@@ -109,6 +109,7 @@ static void *fingerprint_hal_main_thread(void *p)
+     struct cmd_entry *qe;
+     (void) p;
+     init_cmd_fifo2();
++    init_navigate();
+     // endless
+     while ( 1 )
+     {
+@@ -216,7 +217,7 @@ void cancel_cmd_for_post_enroll(void)
+ 		if (gCmdFifo2.cmd_next.state != PROCESS_AUTHENTICATE) {
+ 			gCmdFifo2.cmd_next.exist = 0;
+ 		}
+-		dc_wakeup_fingerprint();
++        dc_wakeup_fingerprint();
+ 		pthread_cond_broadcast(&gCmdQcond);
+ 		pthread_mutex_unlock(&gCmdQmtx);
+ 		LOGD("end.\n");
+diff --git a/fingerprint/client/libfprint/process/refresh.c b/fingerprint/client/libfprint/process/refresh.c
+index 81ac9db..e834e17 100644
+--- a/fingerprint/client/libfprint/process/refresh.c
++++ b/fingerprint/client/libfprint/process/refresh.c
+@@ -1,5 +1,6 @@
+ #define LOG_TAG "MICROARRAY REFRESH"
+ #include <signal.h>
++#include <errno.h>
+ 
+ #include "globalvar.h"
+ #include "config.h"
+@@ -12,6 +13,11 @@ typedef void (* refresh_func_t)(void);
+ #define MAX_ARRAY 5
+ #define MAX_TIMES 12345678
+ 
++static pthread_t gTidMain;
++static int sThreadExit = 0;
++static pthread_mutex_t gCmdQmtx;
++static pthread_cond_t gCmdQcond;
++
+ struct {
+     int construction;
+     int exist;
+@@ -95,21 +101,14 @@ static void handler_interrupt_parameters(void) {
+     static refresh_num = 0;
+     LOGD("start\n");
+     if(push_cmd_for_factory_test() == SUCCESS) {
+-		int detect_touch_error;
+-        if(ma_tac_detect_touch_121(&detect_touch_error) == 0) {
+-			if(detect_touch_error == ERROR_WET_FINGER) {
+-				// 算法判断有水滴，跳过本次校准，以免校准出错
+-				LOGD("handler_interrupt_parameters, detect_touch_error == ERROR_WET_FINGER\n");
+-			} else {
+-				ma_tac_calc_interrupt_para();
+-				LOGD("handler_interrupt_parameters ma_tac_calc_interrupt_para \n");
+-		        refresh_num++;
+-		        if(refresh_num == 10) {
+-		            context_set_interrupt_calibrated(1);
+-		            ma_tac_save_paras();
+-		            refresh_num = 0;
+-		        }
+-			}
++        if(ma_tac_detectTouch_getEnergy() == 0) {
++            ma_tac_calc_interrupt_para();
++            refresh_num++;
++            if(refresh_num == 10) {
++                context_set_interrupt_calibrated(1);
++                ma_tac_save_paras();
++                refresh_num = 0;
++            }
+         } else {
+             ma_tac_sleep();
+         }
+@@ -137,18 +136,60 @@ static void handler_calibrate_data(void)
+     LOGD("end.\n");
+ }
+ 
+-void refresh_timer(void) {
++static void handler_sensor112_calibrate_data(void)
++{
++    LOGD("start.\n");
++    if(push_cmd_for_factory_test() == SUCCESS) {
++        if(ma_tac_refresh_calibrate_data() != SUCCESS) {
++            LOGD("refresh failed.");
++        }
++        ma_tac_sleep();
++        pop_cmd_leave_factory_test();
++    }
++    LOGD("end.\n");
++}
++
++static void *fingerprint_refresh_thread(void *p)
++{
++    //handler(0);
++    while(!sThreadExit)
++    {
++        LOGD("start.\n");
++        process(find_min());
++        usleep(find_min() * 1000 * 1000);
++        LOGD("end.\n");
++    }
++}
++
++void refresh_timer(int is_sensor_changed) {
+     LOGD("start.\n");
+     int calibrated = 0;
+     context_get_interrupt_calibrated(&calibrated);
+-    if(s_chip_id == 83 &&
+-            (g_config.cover_type == COVER_S2 || g_config.cover_type == COVER_S3) &&
+-            (!calibrated)) {
++    if((s_chip_id == 83 && (!calibrated)) ||
++       (s_chip_id == 88 && (!calibrated))) {
+         LOGD("s_chip_id = %d, cover_type = %d", s_chip_id, g_config.cover_type);
+         set_refresh(1, 5, 60, handler_calibrate_data);
++    } else if(s_chip_id == 112 && calibrated && is_sensor_changed == 1) {
++        set_refresh(1, 5, 36, handler_sensor112_calibrate_data);//3min
+     }
+     set_refresh(1, 600, MAX_TIMES, handler_interrupt_parameters);
+-    handler(0);
++    pthread_mutex_init(&gCmdQmtx, NULL);
++    pthread_cond_init(&gCmdQcond, NULL);
++    sThreadExit = 0;
++    pthread_create(&gTidMain, NULL, fingerprint_refresh_thread, NULL);
++
+     LOGD("end.\n");
+ }
+ 
++void refresh_stop(void) {
++    int tmp;
++    LOGD("start.\n");
++    sThreadExit = 1;
++    tmp = pthread_kill(gTidMain, 0);
++    if(tmp == ESRCH)
++        LOGD("pthread not found\n");
++    else if(tmp == EINVAL)
++        LOGD("send an illegal signal\n");
++    else
++        LOGD("pthread still alive\n");
++}
+diff --git a/fingerprint/client/libfprint/process/refresh.h b/fingerprint/client/libfprint/process/refresh.h
+index 08a25b8..364af72 100644
+--- a/fingerprint/client/libfprint/process/refresh.h
++++ b/fingerprint/client/libfprint/process/refresh.h
+@@ -1,6 +1,7 @@
+ #ifndef __REFRESH_H__
+ #define __REFRESH_H__
+ 
+-void refresh_timer(void);
++void refresh_timer(int is_sensor_changed);
++void refresh_stop(void);
+ 
+ #endif
+diff --git a/fingerprint/client/libfprint/tac/communicate_tube.h b/fingerprint/client/libfprint/tac/communicate_tube.h
+index 258dad4..c3af007 100644
+--- a/fingerprint/client/libfprint/tac/communicate_tube.h
++++ b/fingerprint/client/libfprint/tac/communicate_tube.h
+@@ -19,7 +19,7 @@ int ma_tac_set_active_group(microarray_properties_t *config);
+ int ma_tac_set_active_group(microarray_properties_t *config);
+ int ma_tac_do_enroll(uint32_t *info, hw_auth_token_t token);
+ uint32_t ma_tac_enroll_finish(void);
+-int ma_tac_detect_touch(void);
++int ma_tac_detect_touch(int type);
+ int ma_tac_detect_touch_121(int*);
+ uint64_t ma_tac_pre_enroll(void);
+ int ma_tac_do_verify(int *fid_count, uint32_t *fid, int count, hw_auth_token_t *hat);
+diff --git a/fingerprint/client/libfprint/tac/microarray_tac.c b/fingerprint/client/libfprint/tac/microarray_tac.c
+index fb3e3a1..369f6fd 100644
+--- a/fingerprint/client/libfprint/tac/microarray_tac.c
++++ b/fingerprint/client/libfprint/tac/microarray_tac.c
+@@ -148,10 +148,11 @@ uint32_t ma_tac_enroll_finish(void)
+ /*手指按压检测
+  * @return 1:按压，0:未按压，-1000:模式错误，-1:ta执行失败
+  */
+-int ma_tac_detect_touch(void)
++int ma_tac_detect_touch(int type)
+ {
+ 	protocol_detect_touch_t msg;
+ 	memset(&msg, 0, sizeof(protocol_detect_touch_t));
++	msg.request.type = type;
+ 	ma_tac_security_invoke(PROTOCOL_DETECT_TOUCH, &msg, sizeof(protocol_detect_touch_t));
+ 	LOGE("n=%d, a=%d\n", msg.response.n, msg.response.a);
+ 	if (msg.response.err) {
+@@ -355,7 +356,8 @@ int ma_tac_calibrate(void)
+ 	if (msg.response.err) {
+ 		LOGE("error with code 0x%x\n", msg.response.err);
+ 	}
+-	return 0;
++	LOGE("msg.response.ret = %d\n", msg.response.ret);
++	return msg.response.ret;
+ }
+ /*计算中断检测参数
+  * @return 0成功
+@@ -368,7 +370,8 @@ int ma_tac_calc_interrupt_para(void)
+ 	if (msg.response.err) {
+ 		LOGE("error with code 0x%x\n", msg.response.err);
+ 	}
+-	return 0;
++	LOGE("msg.response.ret = %d\n", msg.response.ret);
++	return msg.response.ret;
+ }
+ 
+ /*计算合适的电容、电压值
+@@ -391,7 +394,8 @@ int ma_tac_save_paras(void)
+ 	if (msg.response.err) {
+ 		LOGE("error with code 0x%x\n", msg.response.err);
+ 	}
+-	return 0;
++	LOGE("msg.response.ret = %d\n", msg.response.ret);
++	return msg.response.ret;
+ }
+ 
+ /*检测背景
+diff --git a/fingerprint/include/config.h b/fingerprint/include/config.h
+index bfa8c11..7db5942 100644
+--- a/fingerprint/include/config.h
++++ b/fingerprint/include/config.h
+@@ -38,10 +38,21 @@ enum navigation_result {
+     NAVI_TOO_FAST      = 1 << 9,
+ };
+ 
++enum detect_type {
++    AUTHENTICATE_DETECT,
++    ENROLL_DETECT,
++    PRESS_DETECT,
++    CAPTURE_DETECT,
++};
++
++enum fp_command_info {
++    CMD_CALIBRATE = 1,          //校准
++};
++
+ #define SENSOR_CALIBRATED       1
+ #define INTERRUPT_CALIBRATED    1
+ #define FINGERPRINT_SIZE        5
+-#define TEMPLATE_NUM            50
++#define TEMPLATE_NUM            60
+ #define TEST_TEMPLATE_NUM       10
+ 
+ #define MAX_IMAGE_SIZE (80*192)
+diff --git a/fingerprint/include/protocol.h b/fingerprint/include/protocol.h
+index 81e4606..f8f66c2 100644
+--- a/fingerprint/include/protocol.h
++++ b/fingerprint/include/protocol.h
+@@ -140,7 +140,7 @@ typedef union {
+ 
+ typedef union {
+ 	struct {
+-		int unused;
++		int type;
+ 	} request;
+ 	struct {
+ 		int touched;
+@@ -488,6 +488,7 @@ typedef union {
+     } response;
+ } protocol_refresh_calibrate_data_t;
+ 
++
+ #ifdef PLATFORM_YUNOS
+ typedef struct ma_data {
+     int cmd;
+diff --git a/fingerprint/service/protocol/protocol.c b/fingerprint/service/protocol/protocol.c
+index 8ae9c2b..dbbdfd4 100644
+--- a/fingerprint/service/protocol/protocol.c
++++ b/fingerprint/service/protocol/protocol.c
+@@ -147,7 +147,7 @@ static void protocol_detect_touch(protocol_detect_touch_t *data)
+ 
+     ret = sensor_get_proper_image(g_image_buffer, image_size, 1);
+     if (ret == SUCCESS) {
+-        ret = algorithm_press_detect_texture(g_image_buffer, AUTHENTICATE_DETECT);
++        ret = algorithm_press_detect_texture(g_image_buffer, data->request.type);
+ #ifdef REE_DEBUG
+         sprintf(name, "/data/system/users/0/fpdata/detect%.4d.bmp", num);
+         save_bmp_file(name, g_image_buffer, image_size/IMAGE_H, IMAGE_H);
+@@ -164,7 +164,7 @@ static void protocol_detect_touch(protocol_detect_touch_t *data)
+         data->response.err = 0;
+         data->response.touched = ret;
+     }
+-
++/*
+ 	int n,a;
+ 	context_get_sensor121_interrupt_param(&n, &a);
+ 	data->response.n = n;
+@@ -190,7 +190,7 @@ static void protocol_detect_touch(protocol_detect_touch_t *data)
+ 	} else {
+ 		LOGD("protocol_detect_touch, water != 0;\n");
+ 	}
+-
++*/
+ }
+ 
+ static void protocol_detect_touch_get_energy(protocol_detect_touch_get_energy_t *data)
+@@ -246,7 +246,9 @@ static void protocol_get_image_score(protocol_get_image_score_t *data)
+     int ret;
+ 
+     ret = sensor_get_proper_image(g_image_buffer, image_size, 1);
+-    ret = algorithm_get_energy(g_image_buffer);
++    if(ret == SUCCESS) {
++        ret = algorithm_get_energy(g_image_buffer);
++    }
+     if (ret <= 0) {
+         data->response.err = ret - 1;
+         data->response.score = ret;
+@@ -261,6 +263,8 @@ static void protocol_authenticate(protocol_authenticate_t *data)
+     int ret = 0, fid_count = data->request.count_down;
+     uint32_t fid = 0;
+     uint64_t challenge;
++    challenge = data->request.hat.challenge;
++    memset(data, 0, sizeof(protocol_authenticate_t));
+ #ifdef OEM_CHUANYIN
+     if(s_sensor == NULL){
+         return;
+@@ -268,8 +272,6 @@ static void protocol_authenticate(protocol_authenticate_t *data)
+ #endif
+     ret = algorithm_authenticate(&fid_count, &fid);
+     if (fid != 0) {
+-        challenge = data->request.hat.challenge;
+-        memset(data, 0, sizeof(protocol_authenticate_t));
+         data->response.hat.challenge = challenge;
+         data->response.hat.version = HW_AUTH_TOKEN_VERSION;
+         if (challenge == 0) {
+@@ -343,23 +345,25 @@ static void protocol_has_calibrate(protocol_has_calibrate_t *data)
+ static void protocol_calibrate(protocol_calibrate_t *data)
+ {
+     int ret = 0;
+-    sensor_calc_init_parameters();
+-    if (ret <= 0) {
++    ret = sensor_calc_init_parameters();
++    if (ret < 0) {
+         data->response.err = ret;
+     } else {
+         data->response.err = 0;
+     }
++    data->response.ret = ret;
+ }
+ 
+ static void protocol_calc_interrupt_para(protocol_calc_interrupt_para_t *data)
+ {
+     int ret = 0;
+-    sensor_calc_interrupt_parameters();
++    ret = sensor_calc_interrupt_parameters();
+     if (ret <= 0) {
+         data->response.err = ret;
+     } else {
+         data->response.err = 0;
+     }
++    data->response.ret = ret;
+ }
+ 
+ static void protocol_detect_mode(protocol_detect_mode_t *data)
+@@ -377,11 +381,12 @@ static void protocol_save_paras(protocol_save_paras_t *data)
+ {
+     int ret;
+     ret = sensor_save_paras();
+-    if (ret <= 0) {
++    if (ret < 0) {
+         data->response.err = ret;
+     } else {
+         data->response.err = 0;
+     }
++    data->response.ret = ret;
+ }
+ 
+ static void protocol_factory_test_spi(protocol_factory_test_spi_t *data)
+diff --git a/fingerprint/service/soft_sensor/include/sensor_adapter.h b/fingerprint/service/soft_sensor/include/sensor_adapter.h
+index d0de2ce..6bf654c 100644
+--- a/fingerprint/service/soft_sensor/include/sensor_adapter.h
++++ b/fingerprint/service/soft_sensor/include/sensor_adapter.h
+@@ -15,12 +15,6 @@
+ #include "malib.h"
+ #include "config.h"
+ 
+-enum {
+-    AUTHENTICATE_DETECT,
+-    ENROLL_DETECT,
+-    PRESS_DETECT,
+-    CAPTURE_DETECT,
+-};
+ 
+ typedef struct soft_sensor {
+     
+diff --git a/fingerprint/service/soft_sensor/sensor121/sensor_121.c b/fingerprint/service/soft_sensor/sensor121/sensor_121.c
+index 2df7a82..ebe3163 100644
+--- a/fingerprint/service/soft_sensor/sensor121/sensor_121.c
++++ b/fingerprint/service/soft_sensor/sensor121/sensor_121.c
+@@ -238,6 +238,22 @@ int fp121_read_image(unsigned char *buf, int len, int line_step)
+     return SUCCESS;
+ }
+ 
++static int fp121_bkg_check(const uint8_t* buf, int len, int th)
++{
++    int cnt = 0;
++
++    while ( len-- )
++    {
++        if ( buf[len] < 48 )
++        {
++            // LOGD("%d", len);
++            cnt++;
++        }
++    }
++    LOGD("cnt = %d", cnt);
++    return (cnt <= th) ? SUCCESS : ERROR_BKG_CHECK_FAILED;
++}
++
+ int fp121_calc_init_parameters(void)
+ {
+     int i = 0, ret = SUCCESS, cap_value = 6;
+@@ -288,7 +304,7 @@ int fp121_calc_init_parameters(void)
+             platform_msleep(3);
+             sensor_set_register(MA_CAPACITY_CFG_REG, 0xdc);
+             fp121_read_image(img, IMAGE_SIZE, 1);
+-            if ( !sensor_bkg_check(img, IMAGE_SIZE, 120) )
++            if ( !fp121_bkg_check(img, IMAGE_SIZE, 120) )
+             {
+                 break;
+             }
+@@ -305,7 +321,7 @@ int fp121_calc_init_parameters(void)
+     }
+     LOGD("refctr = 0x%x, volt = 0x%x, grey= %d.\n",
+             refctrl, volt, sensor_get_grey(img, IMAGE_SIZE));
+-
++    context_set_sensor121_bkg(img);
+     context_set_sensor121_param_calibrated(SENSOR_CALIBRATED);
+ 
+     return ret;
+diff --git a/fingerprint/service/soft_sensor/sensor121/sensor_wrapper.c b/fingerprint/service/soft_sensor/sensor121/sensor_wrapper.c
+index 0311300..191ad49 100644
+--- a/fingerprint/service/soft_sensor/sensor121/sensor_wrapper.c
++++ b/fingerprint/service/soft_sensor/sensor121/sensor_wrapper.c
+@@ -96,6 +96,22 @@ static int sensor121_powerdown_mode(void) {
+ 	return fp121_powerdown_mode();
+ }
+ 
++static int sensor121_bkg_check(const uint8_t* buf, int len, int th)
++{
++    int cnt = 0;
++
++    while ( len-- )
++    {
++        if ( buf[len] < 16 )
++        {
++            // LOGD("%d", len);
++            cnt++;
++        }
++    }
++    LOGD("cnt = %d", cnt);
++    return (cnt <= th) ? SUCCESS : ERROR_BKG_CHECK_FAILED;
++}
++
+ /* 采一帧合适的图
+  * @image       采集到的图像
+  * @len         读取图像长度
+@@ -115,7 +131,7 @@ static int sensor121_get_proper_image(void *img, const int len, const int line_s
+ 		return ret;
+ 	}
+ 	ret = fp121_read_image(image, len, line_step);
+-	if (SUCCESS != sensor_bkg_check(image, IMAGE_SIZE, 120)) {
++	if (SUCCESS != sensor121_bkg_check(image, IMAGE_SIZE, 120)) {
+ 		fp121_calc_init_parameters();
+ 		ret = sensor121_capture_mode();
+ 		if (ret) {
+@@ -194,7 +210,9 @@ static int sensor121_calc_init_parameters(void) {
+  */
+ static int sensor121_calc_interrupt_parameters(void) {
+ 	int ret;
++    LOGD("start");
+ 	ret = fp121_calc_interrupt_parameters();
++    LOGD(" end ret = %d",ret);
+ 	return ret;
+ }
+ 
+@@ -428,7 +446,7 @@ static int algorithm121_authenticate(int *fid_count, uint32_t *fid) {
+ 	int isMult = 1, count_down = *fid_count;
+ 
+ 	int water = fp121_checkWater((uint8_t*)g_auth_ctx->auth_image, (uint8_t*)context_get_sensor121_bkg());
+-	LOGD("checkWater ret=%d\n", water);
++	LOGD("--------fht------checkWater ret=%d\n", water);
+ 	if(water==0) { // 有水滴
+ 		return ERROR_WET_FINGER;
+ 	}
+@@ -465,7 +483,7 @@ match_again:
+ 	} else {
+ 		if (isMult == 1 && g_isenroll == 0) {
+ 			isMult = 0;
+-			goto match_again;
++		//	goto match_again;
+ 		} else if (count_down == 0) {
+ 			match_save_bmp(ret, char_num);
+ 			LOGD("score=%d, char_num=%d, matchArea=%d,score_th=%d\n",
