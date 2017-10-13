@@ -1,0 +1,863 @@
+diff --git a/driver/android6.0/ioctl_cmd.h b/driver/android6.0/ioctl_cmd.h
+index 99836de..3088999 100644
+--- a/driver/android6.0/ioctl_cmd.h
++++ b/driver/android6.0/ioctl_cmd.h
+@@ -45,8 +45,8 @@
+ #define DISABLE_IRQ/*DISABLE_IQ*/              _IO(MA_IOC_MAGIC, 32)
+ 
+ #define MA_IOC_GVER             _IOR(MA_IOC_MAGIC,   35, unsigned int)      //get the driver version,the version mapping in the u32 is the final  4+4+8,as ******** ******* ****(major verson number) ****(minor version number) ********(revised version number), the front 16 byte is reserved.
+-#define SCREEN_OFF              _IO(MA_IOC_MAGIC,    36)
+-#define SCREEN_ON               _IO(MA_IOC_MAGIC,    37)
++#define SCREEN_OFF              _IO(MA_IOC_MAGIC,    52)
++#define SCREEN_ON               _IO(MA_IOC_MAGIC,    53)
+ #define SET_SPI_SPEED           _IOW(MA_IOC_MAGIC,   38, unsigned int)
+ 
+ 
+@@ -56,13 +56,22 @@
+ #define WAKEUP_FACTORY_TEST_SEND_FINGERPRINTD_RESPONSE              _IOW(MA_IOC_MAGIC,    42, unsigned int)//for fingerprintd
+ #define WAIT_SCREEN_STATUS_CHANGE                                   _IOR(MA_IOC_MAGIC,    43, unsigned int)
+ #define GET_INTERRUPT_STATUS                                        _IOR(MA_IOC_MAGIC,    44, unsigned int)
+-#define SYNC					_IO(MA_IOC_MAGIC, 45)
++//#define SYNC					_IO(MA_IOC_MAGIC, 45)
+ #define SYNC2					_IO(MA_IOC_MAGIC, 46)
+ #define GET_SCREEN_STATUS		_IOR(MA_IOC_MAGIC, 47, unsigned int)
+ #define WAKE_UP_SCREEN_STATUS   _IO(MA_IOC_MAGIC, 48)
+-#define MA_POWER_ON             _IO(MA_IOC_MAGIC, 49)
++#define MA_IOC_PWOF             _IO(MA_IOC_MAGIC, 36)
++#define MA_IOC_PWON             _IO(MA_IOC_MAGIC, 37)
++#define MA_POWER_RESET          _IO(MA_IOC_MAGIC, 45)
+ #define MA_SID03_REPORT_KEY_ONE        _IO(MA_IOC_MAGIC, 50)
+ #define MA_SID03_REPORT_KEY_TWO        _IO(MA_IOC_MAGIC, 51)
+ 
++
++////////////////////////////////////////////////////////////////////////////////////
++#define WAIT_FINGERPRINT_INTERRUPT  0
++#define WAIT_KEY_INTERRUPT          1
++#define MA_SID03_KEY_LINE_ONE   0x70000001
++#define MA_SID03_KEY_LINE_TWO   0x70000002
++
+ #endif /* __IOCTL_CMD_H__ */
+ 
+diff --git a/fingerprint/client/libfprint/drivercontroller/driver_controller.c b/fingerprint/client/libfprint/drivercontroller/driver_controller.c
+index 1fc7e05..77f7c2a 100644
+--- a/fingerprint/client/libfprint/drivercontroller/driver_controller.c
++++ b/fingerprint/client/libfprint/drivercontroller/driver_controller.c
+@@ -82,15 +82,19 @@ int dc_send_cmd(int cmd)
+ //    wbuf[0] = (cmd >> 8) & 0xff;
+ //    wbuf[1] = (cmd) & 0xff;
+ //    write(g_device_fd, wbuf, 6);
+-
+-    while(1) {
+-        ret = ioctl(g_device_fd, cmd);
+-        if((cmd == WAIT_FACTORY_CMD || cmd == SLEEP) && (ret != 0)) {
+-            ALOGE("%s, cmd=0x%x, ret=%d", __func__, cmd, ret);
+-        } else {
+-            break;
+-        }
+-    }
++//#if defined(A80) || defined(A83) || defined(A96)
++#ifdef OEM_HCT
++	ret = ioctl(g_device_fd, cmd);
++#else
++	while(1) {
++		ret = ioctl(g_device_fd, cmd);
++		if((cmd == WAIT_FACTORY_CMD || cmd == SLEEP) && (ret != 0)) {
++			ALOGE("%s, cmd=0x%x, ret=%d", __func__, cmd, ret);
++		} else {
++			break;
++		}
++	}
++#endif	
+ 	return 0;
+ }
+ 
+diff --git a/fingerprint/client/libfprint/process/authenticate.c b/fingerprint/client/libfprint/process/authenticate.c
+index c759d5f..56e4894 100644
+--- a/fingerprint/client/libfprint/process/authenticate.c
++++ b/fingerprint/client/libfprint/process/authenticate.c
+@@ -272,6 +272,7 @@ void* authenticate_work(void *q)
+ void* authenticate_detect_work(void *q)
+ {
+     int r = 0, press_ok = 0;
++	int chipid = -1,esdfail_num = 0;
+     const int ERROR_IMAGE_COUNT = 4;
+     static int s_error_image_count = 0;
+     static int s_interrupt_error_trigger_count;
+@@ -310,6 +311,34 @@ void* authenticate_detect_work(void *q)
+             //TODO  change the logic/
+             LOGD("go to kernel\n");
+             dc_send_cmd(SLEEP);
++#if defined(A83) || defined(A80)			
++			//esd procedure START
++			chipid = ma_tac_factory_get_vendor();
++			LOGD("resume1 chipid=%d \n",chipid);
++
++			while(chipid != 0x53 && chipid != 0x50) {
++				if (qe->cancelled) {
++					LOGD(" esd  authenticate cancelled\n");
++					return NULL;
++				}
++                LOGD("-----esd while -----");
++                dc_send_cmd(MA_IOC_PWOF);
++
++                if(esdfail_num > 2){
++                    usleep(50000);
++                }else{
++                    usleep(5000);
++                }
++
++                dc_send_cmd(MA_IOC_PWON);
++
++				chipid = ma_tac_factory_get_vendor();
++                esdfail_num++;
++				LOGD("resume2 chipid=%d \n",chipid);
++			}
++            esdfail_num = 0;
++			//esd procedure END
++#endif
+             if ( qe->cancelled ) {
+                 LOGD("command cancelled\n");
+                 return 0;
+diff --git a/fingerprint/client/libfprint/process/navigate.c b/fingerprint/client/libfprint/process/navigate.c
+index 934a6bd..bb84409 100644
+--- a/fingerprint/client/libfprint/process/navigate.c
++++ b/fingerprint/client/libfprint/process/navigate.c
+@@ -63,7 +63,7 @@ static int report_navi_result(uint32_t navi_result) {
+          LOGD("report event SINGLE TAP");
+ #endif
+     }else if (navi_result & NAVI_DOUBLE_TAP) {
+-        dc_send_cmd(DOUBLE_TAP);
++		dc_send_cmd(DOUBLE_TAP);
+         LOGD("report event DOUBLE TAP");
+     }else if (navi_result & NAVI_LONG_TAP) {
+         dc_send_cmd(LONG_TAP);
+@@ -97,8 +97,8 @@ void * navigate_work(void *q)
+ #ifdef A120
+         ma_tac_detect_touch(PRESS_DETECT);
+ #endif
+-        ma_tac_sleep();
+ 
++		ma_tac_sleep();
+         LOGD("go to kernel\n");
+         dc_send_cmd(SLEEP);
+ 
+@@ -109,6 +109,17 @@ void * navigate_work(void *q)
+         ma_tac_init_navigate();
+         down_count = 0;
+         tap_result = NAVI_NONE;
++            
++		//add for hct_ouqi finger press to notify screen on if has no finger 
++			ma_tac_enumerate(g_config.active_group, fids, &fid_count);
++			LOGD("fid_count----------->%d\n",fid_count);
++			//ret = ma_tac_press_test();
++			LOGD("ret----------->%d\n",ret);
++			if(ret == 1 && fid_count == 0)
++			{	
++				report_navi_result(NAVI_DOUBLE_TAP);
++			}
++
+         do{
+             tap_result = ma_tac_navigate_tap(tap_result);
+             // LOGD(" tap result = %d", tap_result);
+@@ -144,7 +155,6 @@ void * navigate_work(void *q)
+         }
+         if( s_interrupt_error_trigger_count > 30 )
+         {
+-            LOGD("need reset int paras");
+             if ( ma_tac_detect_touch(PRESS_DETECT) == NORMAL_UNPRESSED ) {
+ 
+                 LOGD("reset int paras");
+@@ -185,15 +195,15 @@ void * navigate_work(void *q)
+             if (tap_result & NAVI_TAP_UP) {
+                 report_navi_result(NAVI_TAP_UP);
+                 need_report_long_tap = 0;
+-            }
+-            if ( qe->cancelled ) {
+-                LOGD("command cancelled\n");
+-                return NULL;
+-            }
+-        }
+-        need_report_long_tap = 0;
++			}
++			if ( qe->cancelled ) {
++				LOGD("command cancelled\n");
++				return NULL;
++			}
++		}
++		need_report_long_tap = 0;
+ 
+-    }
++	}
+ 
+ }
+ 
+@@ -203,82 +213,82 @@ void * navigate_work(void *q)
+  */
+ void * tap_work_active(void *q)
+ {
+-    struct cmd_entry *qe = (struct cmd_entry *) q;
+-    const int th = 14;
+-    int report_flag = 0;
+-    int count = 0, s_interrupt_error_trigger_count = 0;
+-    unsigned int interrupt_status = 0;
+-    uint32_t fids[FINGERPRINT_SIZE];
+-    int fid_count = 0;
+-    memset(fids, 0, sizeof(fids));
++	struct cmd_entry *qe = (struct cmd_entry *) q;
++	const int th = 14;
++	int report_flag = 0;
++	int count = 0, s_interrupt_error_trigger_count = 0;
++	unsigned int interrupt_status = 0;
++	uint32_t fids[FINGERPRINT_SIZE];
++	int fid_count = 0;
++	memset(fids, 0, sizeof(fids));
+ 
+-    ma_tac_sleep();
+-    usleep(100*1000);
+-    if ( qe->cancelled ) {
+-        LOGD("command cancelled\n");
+-        return NULL;
+-    }
+-    /**************************** tap ******************************/
+-    while (1){
+-        ma_tac_sleep();
+-        LOGD("go to kernel\n");
+-        //check down
+-        dc_send_cmd(SLEEP);
+-        if ( qe->cancelled ) {
+-            LOGD("command cancelled\n");
+-            return NULL;
+-        }
+-        ma_tac_init_navigate();
+-        while(1) {
+-            if ( report_flag == 0 ) {
+-                LOGD("tap down");
+-                report_navi_result(NAVI_TAP_DOWN);
+-                report_flag = 1;
+-            }
+-            ma_tac_sleep();
+-            interrupt_status = 0;
+-            while( count < th && interrupt_status == 0 ) {
+-                usleep(3000);
+-                dc_send_cmd_with_value(GET_INTERRUPT_STATUS, &interrupt_status);
+-                count++;
+-                if ( qe->cancelled ) {
+-                    LOGD("command cancelled\n");
+-                    return NULL;
+-                }
+-            }
+-            count = 0;
+-            if ( interrupt_status == 1 ) {
+-                s_interrupt_error_trigger_count++;
+-            } else if( interrupt_status == 0 ) {
+-                report_flag = 0;
+-                LOGD("tap up");
+-                report_navi_result(NAVI_TAP_UP);
+-                s_interrupt_error_trigger_count=0;
+-                dc_send_cmd(SLEEP);
+-                if ( qe->cancelled ) {
+-                    LOGD("command cancelled\n");
+-                    return NULL;
+-                }
+-            }
+-            if( s_interrupt_error_trigger_count > 30 ) {
+-                LOGE("need reset int paras");
+-                if(ma_tac_detect_touch(PRESS_DETECT) == NORMAL_UNPRESSED) {
+-                    LOGE("reset int paras");
+-                    ma_tac_reset_interrupt_para();
+-                    ma_tac_calc_interrupt_para();
+-                    ma_tac_enumerate(g_config.active_group, fids, &fid_count);
+-                    if(fid_count) {
+-                        ma_tac_save_paras();
+-                    }
+-                    s_interrupt_error_trigger_count = 0;
+-                }
+-            }
+-            if ( qe->cancelled ) {
+-                LOGD("command cancelled\n");
+-                return NULL;
+-            }
+-        }
+-    }
++	ma_tac_sleep();
++	usleep(100*1000);
++	if ( qe->cancelled ) {
++		LOGD("command cancelled\n");
++		return NULL;
++	}
++	/**************************** tap ******************************/
++	while (1){
++		ma_tac_sleep();
++		LOGD("go to kernel\n");
++		//check down
++		dc_send_cmd(SLEEP);
++		if ( qe->cancelled ) {
++			LOGD("command cancelled\n");
++			return NULL;
++		}
++		ma_tac_init_navigate();
++		while(1) {
++			if ( report_flag == 0 ) {
++				LOGD("tap down");
++				report_navi_result(NAVI_TAP_DOWN);
++				report_flag = 1;
++			}
++			ma_tac_sleep();
++			interrupt_status = 0;
++			while( count < th && interrupt_status == 0 ) {
++				usleep(3000);
++				dc_send_cmd_with_value(GET_INTERRUPT_STATUS, &interrupt_status);
++				count++;
++				if ( qe->cancelled ) {
++					LOGD("command cancelled\n");
++					return NULL;
++				}
++			}
++			count = 0;
++			if ( interrupt_status == 1 ) {
++				s_interrupt_error_trigger_count++;
++			} else if( interrupt_status == 0 ) {
++				report_flag = 0;
++				LOGD("tap up");
++				report_navi_result(NAVI_TAP_UP);
++				s_interrupt_error_trigger_count=0;
++				dc_send_cmd(SLEEP);
++				if ( qe->cancelled ) {
++					LOGD("command cancelled\n");
++					return NULL;
++				}
++			}
++			if( s_interrupt_error_trigger_count > 30 ) {
++				LOGE("need reset int paras");
++				if(ma_tac_detect_touch(PRESS_DETECT) == NORMAL_UNPRESSED) {
++					LOGE("reset int paras");
++					ma_tac_reset_interrupt_para();
++					ma_tac_calc_interrupt_para();
++					ma_tac_enumerate(g_config.active_group, fids, &fid_count);
++					if(fid_count) {
++						ma_tac_save_paras();
++					}
++					s_interrupt_error_trigger_count = 0;
++				}
++			}
++			if ( qe->cancelled ) {
++				LOGD("command cancelled\n");
++				return NULL;
++			}
++		}
++	}
+ }
+ 
+ 
+diff --git a/fingerprint/client/libfprint/process/process.c b/fingerprint/client/libfprint/process/process.c
+index f8ca6ef..6630151 100644
+--- a/fingerprint/client/libfprint/process/process.c
++++ b/fingerprint/client/libfprint/process/process.c
+@@ -107,31 +107,52 @@ static struct cmd_entry* fetch_cmd(void)
+  */
+ static void *fingerprint_hal_main_thread(void *p)
+ {
+-    struct cmd_entry *qe;
+-    (void) p;
+-    init_cmd_fifo2();
+-    init_navigate();
+-    // endless
+-    while ( 1 )
+-    {
+-
+-        qe = fetch_cmd();
++	struct cmd_entry *qe;
++	(void) p;
++	init_cmd_fifo2();
++	int chipid = -1,esdfail_num = 0;
++	init_navigate();
+ 
+-        if ( sThreadExit || qe == NULL )
+-        {
+-            LOGE("exit, command queue error\n");
+-            break;
+-        }
+-        LOGD("Command %s is running\n", _num2string(qe->state));
++	// endless
++	while ( 1 )
++	{
+ 
+-        qe->cmd_process(qe);
++        qe = fetch_cmd();
+ 
+-        if(sThreadExit){
+-            break;
+-        }
+-        LOGD("Command %s execute end, start to fetch next.\n", _num2string(qe->state));
+-    }
+-    return NULL;
++		if ( sThreadExit || qe == NULL )
++		{
++			LOGE("exit, command queue error\n");
++			break;
++		}
++		LOGD("Command %s is running\n", _num2string(qe->state));
++#if defined(A83) || defined(A80)
++		//esd procedure START
++		chipid = ma_tac_factory_get_vendor();
++		LOGD("read chipid = %d !!!!!!!!!", chipid);
++		while (chipid != 0x53 && chipid != 0x50) {
++            dc_send_cmd(MA_IOC_PWOF);
++            if(esdfail_num > 2){
++                usleep(50000);
++            }else{
++                usleep(5000);
++            }
++            dc_send_cmd(MA_IOC_PWON);
++            esdfail_num++;
++		    chipid = ma_tac_factory_get_vendor();
++			LOGD("--- esd --power reset !!!!!!!!!!!");
++		}
++        esdfail_num = 0;
++		//esd procedure END
++#endif
++		//ma_tac_detect_touch();
++		qe->cmd_process(qe);
++		/*ma_tac_cancel();*/
++		if(sThreadExit){	
++			break;
++		}
++		LOGD("Command %s execute end, start to fetch next.\n", _num2string(qe->state));
++	}
++	return NULL;
+ }
+ 
+ ////////////////process api////////////////////////
+diff --git a/fingerprint/client/libfprint/tac/gp_tac.c b/fingerprint/client/libfprint/tac/gp_tac.c
+index 933ad67..c94ec90 100644
+--- a/fingerprint/client/libfprint/tac/gp_tac.c
++++ b/fingerprint/client/libfprint/tac/gp_tac.c
+@@ -12,6 +12,20 @@ static TEEC_Session session;
+ static pthread_mutex_t tee_mtx;
+ extern char *display_command(int command);
+ 
++
++static int ta_state = 0;
++static int restart_ta(void) {
++    ALOGE("restart ta");
++    ma_tac_close();
++	ma_tac_init();
++	// need 2 pic to judge stable
++	ma_tac_get_energy();
++	// only 1 image in buffer can't judge
++	ma_tac_get_energy();
++	// now has a background image
++	ma_tac_sleep();
++}
++
+ int ma_tac_create(void)
+ {
+ 	TEEC_Result result;
+@@ -19,8 +33,8 @@ int ma_tac_create(void)
+ 	LOGD("\n");
+ 	pthread_mutex_init(&tee_mtx, NULL);
+ 	result = TEEC_InitializeContext(
+-	             NULL,
+-	             &context);
++			NULL,
++			&context);
+ 
+ 	if (result != TEEC_SUCCESS) {
+ 		LOGE("bad initialize context: 0x%x\n", result);
+@@ -28,13 +42,13 @@ int ma_tac_create(void)
+ 	}
+ 
+ 	result = TEEC_OpenSession(
+-	             &context,
+-	             &session,
+-	             &uuid,
+-	             TEEC_LOGIN_PUBLIC,
+-	             NULL,
+-	             NULL,
+-	             NULL);
++			&context,
++			&session,
++			&uuid,
++			TEEC_LOGIN_PUBLIC,
++			NULL,
++			NULL,
++			NULL);
+ 
+ 	if (result != TEEC_SUCCESS) {
+ 		LOGE("bad open session 0x%x\n", result);
+@@ -53,23 +67,30 @@ int ma_tac_invoke_command(int cmd, void *params, int size)
+ 	int buffer_size;
+ 	int i = 0;
+ 	int remain_size = 0;
+-
++	//resart ta start
++	if (ta_state == TEEC_ERROR_TARGET_DEAD) {
++		ALOGD("ta panic ");
++		ta_state = 0;
++		restart_ta();
++		return TEEC_ERROR_TARGET_DEAD;
++	}
++	//restart end
+ 	if (size > 32) {
+ 		operation.paramTypes = TEEC_PARAM_TYPES(
+-		                           TEEC_MEMREF_TEMP_INOUT,
+-		                           TEEC_NONE,
+-		                           TEEC_NONE,
+-		                           TEEC_NONE);
++				TEEC_MEMREF_TEMP_INOUT,
++				TEEC_NONE,
++				TEEC_NONE,
++				TEEC_NONE);
+ 
+ 		buffer_size = (size / 1024 + 1) * 1024;
+ 		operation.params[0].tmpref.buffer = params;
+ 		operation.params[0].tmpref.size = buffer_size;
+ 	} else {
+ 		operation.paramTypes = TEEC_PARAM_TYPES(
+-		                           TEEC_VALUE_INOUT,
+-		                           TEEC_VALUE_INOUT,
+-		                           TEEC_VALUE_INOUT,
+-		                           TEEC_VALUE_INOUT);
++				TEEC_VALUE_INOUT,
++				TEEC_VALUE_INOUT,
++				TEEC_VALUE_INOUT,
++				TEEC_VALUE_INOUT);
+ 
+ 		for (i = 0; i < 4; i++) {
+ 			remain_size = size - i * 8;
+@@ -84,9 +105,13 @@ int ma_tac_invoke_command(int cmd, void *params, int size)
+ 
+ 	pthread_mutex_lock(&tee_mtx);
+ 
+-    dc_send_cmd(ENABLE_CLK);
++	dc_send_cmd(ENABLE_CLK);
+ 	result = TEEC_InvokeCommand(&session, cmd, &operation, NULL);
+-    dc_send_cmd(DISABLE_CLK);
++    if (result == TEEC_ERROR_TARGET_DEAD) {
++        ta_state = TEEC_ERROR_TARGET_DEAD;
++        //ALOGD("returnOrigin = %u", retOrigin);
++    }
++	dc_send_cmd(DISABLE_CLK);
+ 
+ 	pthread_mutex_unlock(&tee_mtx);
+ 
+diff --git a/fingerprint/client/libfprint/tac/microarray_tac.c b/fingerprint/client/libfprint/tac/microarray_tac.c
+index 09038e9..0327194 100644
+--- a/fingerprint/client/libfprint/tac/microarray_tac.c
++++ b/fingerprint/client/libfprint/tac/microarray_tac.c
+@@ -17,7 +17,10 @@
+ static int g_enroll_num = 0;
+ static int g_enroll_image_num = 0;
+ #endif
+-
++#ifdef PLATFORM_TRUSTKERNEL
++TEEC_Context gContext;
++TEEC_Session gSession;
++#endif
+ static pthread_mutex_t s_tac_mutex;
+ 
+ static int ma_tac_security_invoke(int cmd, void *params, int size)
+@@ -25,9 +28,24 @@ static int ma_tac_security_invoke(int cmd, void *params, int size)
+     pthread_mutex_lock(&s_tac_mutex);
+     ma_tac_invoke_command(cmd, params, size);
+     pthread_mutex_unlock(&s_tac_mutex);
+-    return 0;
++    return  0;
+ }
+ 
++#ifdef PLATFORM_TRUSTKERNEL
++static tac_inited = 0;
++/*关闭CA和
++ * 
++ */
++int ma_tac_close(void) {
++    if (tac_inited == 0) {
++        ALOGD("tac already deinited");
++        return 0;
++    }
++    TEEC_CloseSession(&gSession);   
++	TEEC_FinalizeContext(&gContext);
++    tac_inited = 0;
++}
++#endif
+ /*CA和TA之间建立通信连接
+  *
+  */
+@@ -40,7 +58,16 @@ int ma_tac_init(void)
+ #ifdef TAC_DEBUG_SAVE_FILE
+ 	g_enroll_num = 0;
+ #endif
++#ifdef PLATFORM_TRUSTKERNEL
++	if(tac_inited){
++		ALOGD("tac already inited");
++		return 0;
++	}
++#endif
+ 	ma_tac_create();
++#ifdef PLATFORM_TRUSTKERNEL
++	tac_inited = 1;
++#endif
+ 	init_protocal_key();
+ 	pthread_mutex_init(&s_tac_mutex, NULL);
+ 	ma_tac_security_invoke(PROTOCOL_TAC_INIT, &msg, sizeof(protocol_tac_init_t));
+diff --git a/fingerprint/client/libfprint/utils/ma_utils.c b/fingerprint/client/libfprint/utils/ma_utils.c
+index a92747a..9774cf9 100644
+--- a/fingerprint/client/libfprint/utils/ma_utils.c
++++ b/fingerprint/client/libfprint/utils/ma_utils.c
+@@ -179,7 +179,7 @@ void init_properties(int chip_id, int cover_type, microarray_properties_t *prope
+ 	properties->enroll_times = property_get_int32(KEY_ENROLL_TIMES, ENROLL_TIMES);
+     properties->auth_retry_times = property_get_int32(KEY_AUTH_RETRY_TIMES, AUTH_RETRY_TIMES);
+     properties->long_tap_time = property_get_int32(KEY_LONG_TAP_TIME, 600);//unit ms
+-    properties->enroll_fast_num = property_get_int32(KEY_ENROLL_FAST_NUM, 0);
++    properties->enroll_fast_num = property_get_int32(KEY_ENROLL_FAST_NUM, 2);
+ 
+     get_device_serial_no(properties->device_serial_no);
+ 
+diff --git a/fingerprint/service/policy/policy.c b/fingerprint/service/policy/policy.c
+index c70df9a..9adc190 100644
+--- a/fingerprint/service/policy/policy.c
++++ b/fingerprint/service/policy/policy.c
+@@ -82,6 +82,7 @@ int policy_get_sensor_para(const char* name, void* out_value, int out_value_size
+ 	ret = platform_fs_read(property_name, out_value, out_value_size);
+ 	LOGD("ret = %d\n", ret);
+ 	if(ret == ERROR_FILE_NOT_EXIST) {
++#ifdef PLATFORM_ANDROID
+ 		#if (defined (A121) && defined(OEM_HCT))
+ 			platform_fs_write(property_name, out_value, out_value_size);//add 18
+ 			s_is_load_old_data = 1;
+@@ -89,7 +90,7 @@ int policy_get_sensor_para(const char* name, void* out_value, int out_value_size
+ 	    #else
+ 			policy_get_old_sensor_para(property_name, out_value, out_value_size);
+     	#endif
+-	    
++#endif
+ 	}
+ 	return ret;
+ }
+@@ -167,6 +168,7 @@ int policy_init_template(char* head, int fp_temp_size)
+ 	if(1 == s_is_load_old_data) {
+ 	    LOGD("remove/data/system/users/0/fpdata/fprint.db\n");
+ 	    remove("/data/system/users/0/fpdata/fprint.db");
++        s_is_load_old_data = 0;
+ 	}
+ #endif
+ #endif
+diff --git a/fingerprint/service/soft_sensor/sensor120/sensor_wrapper.c b/fingerprint/service/soft_sensor/sensor120/sensor_wrapper.c
+index e243257..61ed8ed 100644
+--- a/fingerprint/service/soft_sensor/sensor120/sensor_wrapper.c
++++ b/fingerprint/service/soft_sensor/sensor120/sensor_wrapper.c
+@@ -251,6 +251,10 @@ static int sensor120_create(microarray_properties_t *config) {
+ 	LOGD("### calibrated = %d", calibrated);
+ 	if (SENSOR_CALIBRATED != calibrated) {
+ 		ret = sensor120_calc_init_parameters();
++		if(ret == SUCCESS){
++		calibrated =1;
++		context_set_sensor120_param_calibrated(calibrated);
++	}
+ 	}
+ 
+ 	context_get_sensor120_interrupt_calibrated(&g_config.ma_ctx.interrupt_calibrated);
+diff --git a/fingerprint/service/soft_sensor/sensor83/algorithm/detect.c b/fingerprint/service/soft_sensor/sensor83/algorithm/detect.c
+index 4e81c62..0bdaef4 100644
+--- a/fingerprint/service/soft_sensor/sensor83/algorithm/detect.c
++++ b/fingerprint/service/soft_sensor/sensor83/algorithm/detect.c
+@@ -16,7 +16,7 @@ int fp83_press_detect( int *imgRaw, int *imgBkg, unsigned char grey_offset )
+     int TH, count;
+     int val = ((unsigned int)grey_offset << 4) | 0x0f;
+     count = 0;
+-    TH = 100;
++    TH = 40;
+     for ( j = 4; j < 124; j++ ) {
+         for ( i = 4; i < 76; i++ ) {
+             count += ( ( (imgRaw + j*80)[i] - (imgBkg + j*80)[i] ) > TH ) ? 1 : 0;
+diff --git a/fingerprint/service/soft_sensor/sensor83/algorithm/removebkg.c b/fingerprint/service/soft_sensor/sensor83/algorithm/removebkg.c
+index ff0ee4a..b945a6f 100644
+--- a/fingerprint/service/soft_sensor/sensor83/algorithm/removebkg.c
++++ b/fingerprint/service/soft_sensor/sensor83/algorithm/removebkg.c
+@@ -20,7 +20,7 @@ static int myabs(int x) {
+     return x>=0? x: -x;
+ }
+ 
+-static void preRmv_0x3f( int* rawHead, int* bkgHead, s16* srcHead )
++static void preRmv_0x3f( int* rawHead, int* bkgHead, s16* srcHead , unsigned char grey_offset)
+ {
+     int row, col;
+     int *pRaw, *pBkg;
+@@ -31,6 +31,9 @@ static void preRmv_0x3f( int* rawHead, int* bkgHead, s16* srcHead )
+     int val = 1024,val_std,val_ave;
+     int highTH, lowTH;
+ 
++    if(grey_offset == 0x1f){
++        val = 512;
++    }
+     memset(ave,0,80*sizeof(int));
+     pBkg=bkgHead, pRaw=rawHead, pSrc=srcHead;
+ 
+@@ -180,7 +183,7 @@ static void preRmv_0x3f( int* rawHead, int* bkgHead, s16* srcHead )
+     }
+ }
+ 
+-static void fp83_remove_bkg_0x3f( int* imgRawBuf, int* imgBkgBuf, u8* expHead, s16* srcHead)
++static void fp83_remove_bkg_0x3f( int* imgRawBuf, int* imgBkgBuf, u8* expHead, s16* srcHead, unsigned char grey_offset)
+ {
+     int i, j, k;
+     int subTH, addr;
+@@ -190,7 +193,7 @@ static void fp83_remove_bkg_0x3f( int* imgRawBuf, int* imgBkgBuf, u8* expHead, s
+     int *pAveSub, *pVarSub, *pMaskBack, *pTmpMask;
+     int aveTmp, midTmp, range, maxTmp, minTmp, maxGrey, minGrey;
+     int enhanceRate, greyTmp, ind;
+-    preRmv_0x3f( imgRawBuf, imgBkgBuf, srcHead );
++    preRmv_0x3f( imgRawBuf, imgBkgBuf, srcHead ,grey_offset);
+ 
+     for ( i=0, pAveSub=(int*)expHead, pSrc=srcHead;
+         i<16; i++, pAveSub+=10 )
+@@ -602,7 +605,11 @@ static void fp83_remove_bkg_0x60( int* imgRawBuf, int* imgBkgBuf, u8* expHead, s
+ 
+ void fp83_remove_bkg( int* imgRawBuf, int* imgBkgBuf, u8* expHead, s16* srcHead, unsigned char grey_offset) {
+     if(grey_offset == 0x3f) {
+-        fp83_remove_bkg_0x3f(imgRawBuf, imgBkgBuf, expHead, srcHead);
++        LOGD("--------OX3F------");
++        fp83_remove_bkg_0x3f(imgRawBuf, imgBkgBuf, expHead, srcHead, grey_offset);
++    }else if(grey_offset == 0x1f) {
++        LOGD("--------OX1F------");
++        fp83_remove_bkg_0x3f(imgRawBuf, imgBkgBuf, expHead, srcHead, grey_offset);
+     } else if(grey_offset == 0x60) {
+         fp83_remove_bkg_0x60(imgRawBuf, imgBkgBuf, expHead, srcHead);
+     } else {
+diff --git a/fingerprint/service/soft_sensor/sensor83/algorithm/sensor83_navigate.c b/fingerprint/service/soft_sensor/sensor83/algorithm/sensor83_navigate.c
+index e7abf6c..1cc9431 100644
+--- a/fingerprint/service/soft_sensor/sensor83/algorithm/sensor83_navigate.c
++++ b/fingerprint/service/soft_sensor/sensor83/algorithm/sensor83_navigate.c
+@@ -26,7 +26,7 @@ int fp83_get_center(int* imgRawBuf, int* imgBkgBuf, u8 *pBlock, int *tmpCenter)
+                 pBkg[0]-pBkg[1]-pBkg[2]-pBkg[3]-pBkg[4]-pBkg[5]-pBkg[6]-pBkg[7] );
+             pBkg+=8;
+             pRaw+=8;
+-            if(greySum>800)
++            if(greySum>400)
+             {
+                 *pBlock = 1;
+                 center += row;
+diff --git a/fingerprint/service/soft_sensor/sensor83/sensor_83.c b/fingerprint/service/soft_sensor/sensor83/sensor_83.c
+index ba0e3be..376ebdf 100644
+--- a/fingerprint/service/soft_sensor/sensor83/sensor_83.c
++++ b/fingerprint/service/soft_sensor/sensor83/sensor_83.c
+@@ -26,7 +26,7 @@ static const int s_interrupt_framerow = 2;
+ const int BKG_GREY_AVG_THRESHOLD = 2000*IMAGE_SIZE;
+ 
+ int g_close_driver_refdrv = 0;
+-int g_sensor83_grey_offset = 0x3f;
++int g_sensor83_grey_offset = 0x1f;
+ const int g_main_config = 0xe0;
+ const int g_sid03_tgrtr_en_val = 0x00;
+ int g_slope = 0, g_close_driver_score = 0;
+@@ -48,15 +48,18 @@ int fp83_create(int cover_type)
+     if ( cover_type == COVER_S2) {
+         platform_spi_set_speed(4);
+         context_set_sensor83_refdrv(0x3e);
+-        g_sensor83_grey_offset = 0x3f;
++        LOGD("-----fht 1----");
++        g_sensor83_grey_offset = 0x1f;
+     } else if(cover_type == COVER_S3) {
+-        platform_spi_set_speed(2);
++        platform_spi_set_speed(4);
++        LOGD("-----fht 2----");
+         context_set_sensor83_refdrv(0x3e);
+         g_sensor83_grey_offset = 0x60;
+     } else {
+         platform_spi_set_speed(4);
++        LOGD("-----fht 3----");
+         context_set_sensor83_refdrv(0x3a);
+-        g_sensor83_grey_offset = 0x3f;
++        g_sensor83_grey_offset = 0x1f;
+     }
+     sp_thresh = context_get_sensor83_sid03_thresh_data();
+     sp_capsel_data = context_get_sensor83_sid03_capsel();
+@@ -188,7 +191,7 @@ int fp83_capture_mode(void)
+             s_sensor_mode == RESET_MODE ||
+             s_sensor_mode == POWERDOWN_MODE ) {
+         if(g_config.cover_type == COVER_S3) {
+-            platform_spi_set_speed(2);
++            platform_spi_set_speed(4);
+             ret = sensor_sid_set_mode(RESET_MODE, RESET_MODE);
+         } else {
+             ret = sensor_set_mode(RESET_MODE);
+@@ -253,7 +256,7 @@ static int fp83_detect_mode_parameters(
+     }
+     if(g_config.cover_type == COVER_S3) {
+         sid03_detect_mode();
+-        platform_spi_set_speed(2);
++        platform_spi_set_speed(4);
+         sensor_set_register(MA_GREY_OFST_REG, g_sensor83_grey_offset);
+ 
+     }
+diff --git a/fingerprint/service/soft_sensor/sensor83/sensor_wrapper.c b/fingerprint/service/soft_sensor/sensor83/sensor_wrapper.c
+index ed3ecd1..c06289c 100644
+--- a/fingerprint/service/soft_sensor/sensor83/sensor_wrapper.c
++++ b/fingerprint/service/soft_sensor/sensor83/sensor_wrapper.c
+@@ -450,33 +450,33 @@ static int algorithm83_press_detect_texture(void *image, int type) {
+ 	    ret = (sratio > 25) ? NORMAL_PRESSED : NORMAL_UNPRESSED;
+ 	    break;
+ 	}
+-//	if (ret == NORMAL_PRESSED) {
+-//		fp83_remove_bkg(image_in, context_get_sensor83_bkg(),
+-//			g_auth_ctx->remove_bkg_img, g_enroll_ctx->proc_buf, g_sensor83_grey_offset);
+-//		if ((count - g_enroll_ctx->max_count) > (SIZE - g_enroll_ctx->max_count) / 10) {
+-//			memcpy(g_enroll_ctx->max_image, image_in, sizeof(g_enroll_ctx->max_image));
+-//			g_enroll_ctx->max_count = count;
+-//		}
+-//	} else {
+-//	    s_cnt_base = 0;
+-//	    s_cnt_img = 0;
+-//	    g_enroll_ctx->max_count = 0;
+-//	    memset(g_enroll_ctx->max_image, 0, sizeof(g_enroll_ctx->max_image));
+-//	}
+-
+-	if(type==AUTHENTICATE_DETECT) {
+-		ret = select_image(sratio, image_in);
+-	} else {
+-		if(ret==NORMAL_PRESSED) {
+-			fp83_remove_bkg(image_in, context_get_sensor83_bkg(),
+-				g_auth_ctx->remove_bkg_img, g_enroll_ctx->proc_buf, g_sensor83_grey_offset);
+-			if ((count - g_enroll_ctx->max_count) > (SIZE - g_enroll_ctx->max_count) / 10) {
+-				memcpy(g_enroll_ctx->max_image, image_in, sizeof(g_enroll_ctx->max_image));
+-				g_enroll_ctx->max_count = count;
+-			}
++	if (ret == NORMAL_PRESSED) {
++		fp83_remove_bkg(image_in, context_get_sensor83_bkg(),
++			g_auth_ctx->remove_bkg_img, g_enroll_ctx->proc_buf, g_sensor83_grey_offset);
++		if ((count - g_enroll_ctx->max_count) > (SIZE - g_enroll_ctx->max_count) / 10) {
++			memcpy(g_enroll_ctx->max_image, image_in, sizeof(g_enroll_ctx->max_image));
++			g_enroll_ctx->max_count = count;
+ 		}
++	} else {
++	    s_cnt_base = 0;
++	    s_cnt_img = 0;
++	    g_enroll_ctx->max_count = 0;
++	    memset(g_enroll_ctx->max_image, 0, sizeof(g_enroll_ctx->max_image));
+ 	}
+ 
++/*   if(type==AUTHENTICATE_DETECT) {*/
++		/*ret = select_image(sratio, image_in);*/
++	/*} else {*/
++		/*if(ret==NORMAL_PRESSED) {*/
++			/*fp83_remove_bkg(image_in, context_get_sensor83_bkg(),*/
++				/*g_auth_ctx->remove_bkg_img, g_enroll_ctx->proc_buf, g_sensor83_grey_offset);*/
++			/*if ((count - g_enroll_ctx->max_count) > (SIZE - g_enroll_ctx->max_count) / 10) {*/
++				/*memcpy(g_enroll_ctx->max_image, image_in, sizeof(g_enroll_ctx->max_image));*/
++				/*g_enroll_ctx->max_count = count;*/
++			/*}*/
++		/*}*/
++	/*}*/
++
+ 	LOGD("count=%d ratio=%d, ret=%d grey offset=0x%x\n", count, sratio, ret, g_sensor83_grey_offset);
+ 
+ 	return ret;
+diff --git a/version/product.csv b/version/product.csv
+index 1916583..d04bb89 100644
+--- a/version/product.csv
++++ b/version/product.csv
+@@ -20,3 +20,4 @@ A156,Yude,4.0.00,A121_N,Trustonic,armeabi arm64-v8a,Android6.0,Yes,Yes,Yes,No,14
+ Z285,Yude,4.0.1,A121_N,Trustkernel,arm64-v8a,Android6.0,Yes,Yes,Yes,Yes,14,3
+ F620,XINGFEI,4.0.00,A83_T,Android,arm64-v8a,Android6.0,Yes,Yes,Yes,No,14,3
+ Android,Hct,4.0.00,A120_N,Trustkernel,arm64-v8a armeabi,Android6.0,Yes,Yes,Yes,No,14,3
++Android,Hct,4.0.00,A80_T&A83_T,Trustkernel,arm64-v8a armeabi,Android6.0,Yes,Yes,Yes,No,14,1
