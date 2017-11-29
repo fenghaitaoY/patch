@@ -1,0 +1,73 @@
+diff --git a/fingerprint/client/libfprint/include/globalvar.h b/fingerprint/client/libfprint/include/globalvar.h
+index 134ada3..f271c66 100644
+--- a/fingerprint/client/libfprint/include/globalvar.h
++++ b/fingerprint/client/libfprint/include/globalvar.h
+@@ -42,5 +42,5 @@ extern unsigned int g_driver_version;
+ 
+ extern int g_auth_num;
+ extern int g_auth_image_num;
+-
++extern int g_work_enroll;
+ #endif /* GLOBALVAR_H_ */
+diff --git a/fingerprint/client/libfprint/interface/ca_interface.c b/fingerprint/client/libfprint/interface/ca_interface.c
+index 7550eee..241571b 100644
+--- a/fingerprint/client/libfprint/interface/ca_interface.c
++++ b/fingerprint/client/libfprint/interface/ca_interface.c
+@@ -22,7 +22,7 @@ const char *version = "version :"OEM"_"SUPPORT_SENSOR"_"BUILD_VERSION"_"GIT_SHOR
+ microarray_properties_t g_config;
+ bio_status_t g_bio_status = {0};
+ bio_context_t g_bio_context = {0};
+-
++int g_work_enroll = 0;
+ 
+ /*hal层的准备工作
+  * @return 0:success
+@@ -201,6 +201,7 @@ int bio_cancel(void)
+ 	    LOGD("end, duplicate cancel.\n");
+ 	    return SUCCESS;
+ 	}
++    g_work_enroll = 0;
+ 	g_bio_status.is_fp_canceled = 1;
+     cancel_cmd();
+     
+@@ -229,6 +230,7 @@ uint64_t bio_pre_enroll(void)
+     cancel_cmd();
+ #endif
+     ret = ma_tac_pre_enroll();
++    g_work_enroll = 0;
+     LOGD("end. ret = %d", ret);
+ 
+     return ret;
+@@ -259,6 +261,7 @@ int bio_enroll(uint32_t gid, uint32_t timeout_sec,const hw_auth_token_t *token)
+     // warning const set to unconst
+     cmd_enrollcalibrate.token = token;
+     enqueue_cmd(enrollcalibrate_work, (void*)&cmd_enrollcalibrate, PROCESS_ENROLLCALIBRATE);
++    g_work_enroll = 1;
+     LOGD("end.");
+     return 0;
+ }
+@@ -270,6 +273,7 @@ int bio_post_enroll(void)
+ {
+     g_bio_status.is_fp_canceled = 0;
+     cancel_cmd_for_post_enroll();
++    g_work_enroll = 0;
+     return 0;
+ }
+ 
+diff --git a/fingerprint/client/libfprint/utils/notifyplatform51.c b/fingerprint/client/libfprint/utils/notifyplatform51.c
+index 06fa07c..9c31454 100644
+--- a/fingerprint/client/libfprint/utils/notifyplatform51.c
++++ b/fingerprint/client/libfprint/utils/notifyplatform51.c
+@@ -123,8 +123,10 @@ void acquired_event_notify(uint32_t event)
+             fp.ecode = FP_CHK_UP;
+             break;
+     }
+-    LOGD("==msg = %d, fid = %d, result = %d, ecode = %d \n",fp.msg, fp.fid, fp.result, fp.ecode);
+-	gNotify(&fp);
++    if(g_work_enroll == 1){
++        LOGD("==msg = %d, fid = %d, result = %d, ecode = %d \n",fp.msg, fp.fid, fp.result, fp.ecode);
++	    gNotify(&fp);
++    }
+ 	LOGE("end\n");
+ }
+ 

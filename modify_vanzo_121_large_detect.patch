@@ -1,0 +1,80 @@
+diff --git a/fingerprint/client/libfprint/process/authenticate.c b/fingerprint/client/libfprint/process/authenticate.c
+index 83d36ec..15cf311 100644
+--- a/fingerprint/client/libfprint/process/authenticate.c
++++ b/fingerprint/client/libfprint/process/authenticate.c
+@@ -175,7 +175,9 @@ void* authenticate_work(void *q)
+ 		}
+ 
+ 		dc_send_cmd(TIMEOUT_WAKELOCK);
+-		r = verify(qe);
++        if(r == NORMAL_PRESSED){
++		    r = verify(qe);
++        }
+ 
+ 		if (qe->cancelled) {
+ 			LOGD("authenticate cancelled\n");
+diff --git a/fingerprint/include/config.h b/fingerprint/include/config.h
+index c7b9523..0f8e24e 100644
+--- a/fingerprint/include/config.h
++++ b/fingerprint/include/config.h
+@@ -47,8 +47,8 @@ enum navigation_result {
+ 
+ #ifdef A121
+ //#define TEMPLATE_SIZE 3664
+-#define DEFAULT_ENERGY_THRESHOLD_A121                    200
+-#define DEFAULT_DETECT_THRESHOLD_A121                    128
++#define DEFAULT_ENERGY_THRESHOLD_A121                    250
++#define DEFAULT_DETECT_THRESHOLD_A121                    1024
+ #define DEFAULT_AUTHENTICATE_SCORE_A121                  75
+ #define DEFAULT_AUTHENTICATE_LEVEL_A121                  4
+ #define DEFAULT_AUTHENTICATE_CHARACTERISTIC_NUM_A121     1
+@@ -57,8 +57,8 @@ enum navigation_result {
+ #ifdef A120
+ //#define TEMPLATE_SIZE 3664
+ #define DEFAULT_ENERGY_THRESHOLD_A120                    1
+-#define DEFAULT_DETECT_THRESHOLD_A120                    128
+-#define DEFAULT_DETECT_THRESHOLD_A120T                   64
++#define DEFAULT_DETECT_THRESHOLD_A120                    256
++#define DEFAULT_DETECT_THRESHOLD_A120T                   256
+ #define DEFAULT_AUTHENTICATE_SCORE_A120                  75
+ #define DEFAULT_AUTHENTICATE_LEVEL_A120                  4
+ #define DEFAULT_AUTHENTICATE_CHARACTERISTIC_NUM_A120     1
+diff --git a/fingerprint/service/soft_sensor/sensor121/algorithm/detect.c b/fingerprint/service/soft_sensor/sensor121/algorithm/detect.c
+index eb4bc97..13a6b3d 100644
+--- a/fingerprint/service/soft_sensor/sensor121/algorithm/detect.c
++++ b/fingerprint/service/soft_sensor/sensor121/algorithm/detect.c
+@@ -79,7 +79,7 @@ int fp121_press_detect_texture(uint8_t *imgBuf, int parTH, int *rangeWeight)
+ 
+     *rangeWeight = afs121_corrWeight(imgBuf);
+     LOGD("curTH=%d, rangeWeight=%d\n", curTH, *rangeWeight);
+-    if (*rangeWeight > curTH) {
++    if (*rangeWeight > 10 * curTH) {
+         return 1;
+     }
+     return 0;
+diff --git a/fingerprint/service/soft_sensor/sensor121/sensor_wrapper.c b/fingerprint/service/soft_sensor/sensor121/sensor_wrapper.c
+index 495c19a..26423a8 100644
+--- a/fingerprint/service/soft_sensor/sensor121/sensor_wrapper.c
++++ b/fingerprint/service/soft_sensor/sensor121/sensor_wrapper.c
+@@ -298,7 +298,7 @@ static int algorithm121_press_detect_texture(void *image_in, int type)
+     fp121_remove_bkg((unsigned char *)image_in, context_get_sensor121_bkg(), g_auth_ctx->remove_bkg_img);
+     memcpy(img, g_auth_ctx->remove_bkg_img, IMAGE_SIZE);
+     dtc = fp121_press_detect_texture(img, g_config.detect_threshold, &weight);
+-    LOGD("------------------dtc = %d \n",dtc);
++    LOGD("------------------dtc = %d  , detect_threshold = %d \n",dtc, g_config.detect_threshold);
+     ret = ( dtc == 1 ) ? NORMAL_PRESSED : NORMAL_UNPRESSED;
+ #ifdef NEW_AFS121_REMOVE_BKG
+     memset(g_auth_ctx->remove_bkg_img, 0, IMAGE_SIZE);
+diff --git a/version/test.csv b/version/test.csv
+index 62f00ae..38febfd 100644
+--- a/version/test.csv
++++ b/version/test.csv
+@@ -1,7 +1,7 @@
+ Product,OEM,Version,Support Sensor,Platform,APP ABI,Operation System,Enable Navigation,Return After Authenticate,Filter Duplicate Enroll,Filter Part Touch Enroll,Enroll Times,Auth Retry Times
+ Default,Android,4.0.00,A121_N,Android,arm64-v8a,Android6.0,Yes,Yes,Yes,No,14,3
+ Default,Android,4.0.00,A96_N,Android,arm64-v8a,Android6.0,Yes,Yes,Yes,No,14,3
+-Default,Android,4.0.00,A121_N,Android,armeabi,Android6.0,Yes,Yes,Yes,No,14,3
++Default,Android,4.0.00,A121_N,Android,arm64-v8a armeabi,Android6.0,Yes,Yes,Yes,No,14,3
+ Default,Android,4.0.00,A96_N,Android,armeabi,Android6.0,Yes,Yes,Yes,No,14,3
+ Default,Android,4.0.00,A82_N,Android,armeabi,Android6.0,Yes,Yes,Yes,No,14,3
+ Default,Android,4.0.00,A121_N,Trustkernel,arm64-v8a,Android6.0,Yes,Yes,Yes,No,14,3

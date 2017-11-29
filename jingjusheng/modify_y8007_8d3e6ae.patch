@@ -1,0 +1,111 @@
+diff --git a/fingerprint/client/libfprint/include/globalvar.h b/fingerprint/client/libfprint/include/globalvar.h
+index 134ada3..f271c66 100644
+--- a/fingerprint/client/libfprint/include/globalvar.h
++++ b/fingerprint/client/libfprint/include/globalvar.h
+@@ -42,5 +42,5 @@ extern unsigned int g_driver_version;
+ 
+ extern int g_auth_num;
+ extern int g_auth_image_num;
+-
++extern int g_work_enroll;
+ #endif /* GLOBALVAR_H_ */
+diff --git a/fingerprint/client/libfprint/interface/ca_interface.c b/fingerprint/client/libfprint/interface/ca_interface.c
+index 7550eee..241571b 100644
+--- a/fingerprint/client/libfprint/interface/ca_interface.c
++++ b/fingerprint/client/libfprint/interface/ca_interface.c
+@@ -22,7 +22,7 @@ const char *version = "version :"OEM"_"SUPPORT_SENSOR"_"BUILD_VERSION"_"GIT_SHOR
+ microarray_properties_t g_config;
+ bio_status_t g_bio_status = {0};
+ bio_context_t g_bio_context = {0};
+-
++int g_work_enroll = 0;
+ 
+ /*hal层的准备工作
+  * @return 0:success
+@@ -201,6 +201,7 @@ int bio_cancel(void)
+ 	    LOGD("end, duplicate cancel.\n");
+ 	    return SUCCESS;
+ 	}
++    g_work_enroll = 0;
+ 	g_bio_status.is_fp_canceled = 1;
+     cancel_cmd();
+     
+@@ -229,6 +230,7 @@ uint64_t bio_pre_enroll(void)
+     cancel_cmd();
+ #endif
+     ret = ma_tac_pre_enroll();
++    g_work_enroll = 0;
+     LOGD("end. ret = %d", ret);
+ 
+     return ret;
+@@ -259,6 +261,7 @@ int bio_enroll(uint32_t gid, uint32_t timeout_sec,const hw_auth_token_t *token)
+     // warning const set to unconst
+     cmd_enrollcalibrate.token = token;
+     enqueue_cmd(enrollcalibrate_work, (void*)&cmd_enrollcalibrate, PROCESS_ENROLLCALIBRATE);
++    g_work_enroll = 1;
+     LOGD("end.");
+     return 0;
+ }
+@@ -270,6 +273,7 @@ int bio_post_enroll(void)
+ {
+     g_bio_status.is_fp_canceled = 0;
+     cancel_cmd_for_post_enroll();
++    g_work_enroll = 0;
+     return 0;
+ }
+ 
+diff --git a/fingerprint/client/libfprint/process/enrollcalibrate.c b/fingerprint/client/libfprint/process/enrollcalibrate.c
+index c468f1b..e1136af 100644
+--- a/fingerprint/client/libfprint/process/enrollcalibrate.c
++++ b/fingerprint/client/libfprint/process/enrollcalibrate.c
+@@ -57,7 +57,7 @@ void* enrollcalibrate_work(void * q)
+         // wait finger leave
+             presscount = g_config.enroll_fast_num;
+             while (presscount > 0 && down) {
+-                down = ma_tac_detectTouch_getEnergy();
++                down = ma_tac_detect_touch(AUTHENTICATE_DETECT);
+                 LOGD("detect touch down2 = %d \n",down);
+                 if ( qe->cancelled) {
+                     LOGD("command cancelled\n");
+diff --git a/fingerprint/client/libfprint/utils/notifyplatform51.c b/fingerprint/client/libfprint/utils/notifyplatform51.c
+index 06fa07c..9c31454 100644
+--- a/fingerprint/client/libfprint/utils/notifyplatform51.c
++++ b/fingerprint/client/libfprint/utils/notifyplatform51.c
+@@ -123,8 +123,10 @@ void acquired_event_notify(uint32_t event)
+             fp.ecode = FP_CHK_UP;
+             break;
+     }
+-    LOGD("==msg = %d, fid = %d, result = %d, ecode = %d \n",fp.msg, fp.fid, fp.result, fp.ecode);
+-	gNotify(&fp);
++    if(g_work_enroll == 1){
++        LOGD("==msg = %d, fid = %d, result = %d, ecode = %d \n",fp.msg, fp.fid, fp.result, fp.ecode);
++	    gNotify(&fp);
++    }
+ 	LOGE("end\n");
+ }
+ 
+diff --git a/fingerprint/service/soft_sensor/sensor88/wrapper_v2.c b/fingerprint/service/soft_sensor/sensor88/wrapper_v2.c
+index d21d766..35a8339 100644
+--- a/fingerprint/service/soft_sensor/sensor88/wrapper_v2.c
++++ b/fingerprint/service/soft_sensor/sensor88/wrapper_v2.c
+@@ -200,7 +200,7 @@ static int algorithm88_enroll(void) {
+     if (g_config.enable_dirty_check) {
+         int dirty = fp88_finger_detect(enroll_image);
+         LOGD("dirty=%d press_ratio=%d\n", dirty, g88_press_ratio);
+-        if(dirty<80) { //部分按压
++        if(dirty<50) { //部分按压
+             ret = ERROR_ENROLL_PART_TOUCH;
+             goto clear;
+         } else if (dirty > 100) {
+diff --git a/version/test.csv b/version/test.csv
+index 15864f5..742611b 100644
+--- a/version/test.csv
++++ b/version/test.csv
+@@ -33,6 +33,7 @@ Default,Android,A83_N,Microtrust,armeabi-v7a arm64-v8a,Android5.1,Yes,Yes,Yes,No
+ Default,Android,A80_T,Android,armeabi-v7a arm64-v8a,Android5.1,Yes,Yes,Yes,No,14,3
+ Default,Android,A96_N,Android,armeabi-v7a arm64-v8a,Android5.1,Yes,Yes,Yes,No,14,3
+ Default,Android,A120_T,Android,armeabi-v7a arm64-v8a,Android5.1,Yes,Yes,Yes,No,14,3
++Default,Android,A96_N&A88_N,Android,arm64-v8a armeabi-v7a,Android5.1,Yes,Yes,Yes,No,14,3
+ Default,Android,A120_T,Android,armeabi-v7a arm64-v8a,Android6.0,Yes,Yes,Yes,No,14,3
+ Default,Android,A96_N,Trustkernel,arm64-v8a,Android6.0,Yes,Yes,Yes,No,14,3
+ Default,Android,A120_N,Microtrust,armeabi-v7a arm64-v8a,Android6.0,Yes,Yes,Yes,No,14,3

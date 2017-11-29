@@ -1,0 +1,44 @@
+diff --git a/fingerprint/service/soft_sensor/sensor96/sensor_wrapper.c b/fingerprint/service/soft_sensor/sensor96/sensor_wrapper.c
+index 42e1619..f4c9580 100644
+--- a/fingerprint/service/soft_sensor/sensor96/sensor_wrapper.c
++++ b/fingerprint/service/soft_sensor/sensor96/sensor_wrapper.c
+@@ -533,7 +533,7 @@ static int algorithm96_enroll(void)
+         memset(g_enroll_ctx->max_image, 0, sizeof(g_enroll_ctx->max_image));
+         return ERROR_ENROLL_FAIL;
+     }
+-    if(g_config.filter_duplicate_enroll) {
++    /*if(g_config.filter_duplicate_enroll) {
+         if ( algorithm96_authenticate(&fid_count) ) { //注册时的验证fid_count为-1；匹配时的验证fidcount为0._
+             LOGD("duplicate finger.");
+             //清除max_image
+@@ -542,7 +542,7 @@ static int algorithm96_enroll(void)
+             memset(g_enroll_ctx->max_image, 0, sizeof(g_enroll_ctx->max_image));
+             return ERROR_ENROLL_DUPLICATE_FINGER;
+         }
+-    }
++    }*/
+ 
+     ret = alg96_enroll(g_enroll_ctx->template_data, TEMPLATE_NUM_A96, &area);
+     temp_num = alg96_getState(g_enroll_ctx->template_data, TEMPLATE_NUM_A96);
+@@ -552,7 +552,7 @@ static int algorithm96_enroll(void)
+     g_enroll_ctx->max_count = 0;
+     memset(g_enroll_ctx->max_image, 0, sizeof(g_enroll_ctx->max_image));
+ 
+-    if(ret < 2) {
++    if(ret < 1) {
+         if(g_init_enroll == 1) { //第一次注册区域失败不能报重复区域，只能报部分手指
+             LOGD("end. bad image.");
+             return ERROR_ENROLL_FAIL;
+diff --git a/version/test.csv b/version/test.csv
+index 62f00ae..c63c9c8 100644
+--- a/version/test.csv
++++ b/version/test.csv
+@@ -26,7 +26,7 @@ Default,Android,4.0.00,A121_N,Android,armeabi arm64-v8a,Android5.1,Yes,Yes,Yes,N
+ Default,Android,4.0.00,A83_N,Android,armeabi arm64-v8a,Android5.1,Yes,Yes,Yes,No,14,3
+ Default,Android,4.0.00,A83_T,Android,armeabi arm64-v8a,Android5.1,Yes,Yes,Yes,No,14,3
+ Default,Android,4.0.00,A80_T,Android,armeabi arm64-v8a,Android5.1,Yes,Yes,Yes,No,14,3
+-Default,Android,4.0.00,A96_N,Android,armeabi arm64-v8a,Android5.1,Yes,Yes,Yes,No,14,3
++Default,Android,4.0.00,A96_N,Android,armeabi arm64-v8a,Android5.1,Yes,Yes,Yes,No,10,3
+ Default,Android,4.0.00,A120_T,Android,armeabi arm64-v8a,Android5.1,Yes,Yes,Yes,No,14,3
+ Default,Android,4.0.00,A120_T,Android,armeabi arm64-v8a,Android6.0,Yes,Yes,Yes,No,14,3
+ Default,Android,4.0.00,A96_N,Trustonic,armeabi,Android6.0,Yes,Yes,Yes,No,14,3

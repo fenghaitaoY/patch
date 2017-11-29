@@ -1,0 +1,37 @@
+diff --git a/fingerprint/client/libfprint/process/authenticate.c b/fingerprint/client/libfprint/process/authenticate.c
+index 4a9d2cd..4f77cfa 100644
+--- a/fingerprint/client/libfprint/process/authenticate.c
++++ b/fingerprint/client/libfprint/process/authenticate.c
+@@ -103,6 +103,9 @@ static int verify(struct cmd_entry *qe)
+         }
+         if (fid) {
+             dc_send_cmd(TIMEOUT_WAKELOCK);
++#if defined(OEM_KUSAI)
++            dc_send_cmd(MA_KEY_F14);
++#endif
+             authenticate_notify(cmd_auth->gid, fid, gHat);
+             gettimeofday(&now,NULL);
+ 
+diff --git a/fingerprint/client/libfprint/process/enrollcalibrate.c b/fingerprint/client/libfprint/process/enrollcalibrate.c
+index c468f1b..f87391f 100644
+--- a/fingerprint/client/libfprint/process/enrollcalibrate.c
++++ b/fingerprint/client/libfprint/process/enrollcalibrate.c
+@@ -110,7 +110,7 @@ void* enrollcalibrate_work(void * q)
+                     	LOGD("do nothing");
+                     } else if (ret == ERROR_EXTRACT_FAIL) {
+                         LOGD("image extract fail.");
+-                        acquired_event_notify(FINGERPRINT_ACQUIRED_INSUFFICIENT);
++                        //acquired_event_notify(FINGERPRINT_ACQUIRED_INSUFFICIENT);
+                     } else if (ret == ERROR_ENROLL_DUPLICATE_AREA) {
+                     	duplicate_area_num++;
+                     	if(duplicate_area_num<6) {
+diff --git a/version/product.csv b/version/product.csv
+index 58a70d4..29ed681 100644
+--- a/version/product.csv
++++ b/version/product.csv
+@@ -20,4 +20,4 @@ A156,Yude,A121_N,Trustonic,armeabi arm64-v8a,Android6.0,Yes,Yes,Yes,No,14,3
+ Z285,Yude,A121_N,Trustkernel,arm64-v8a,Android6.0,Yes,Yes,Yes,Yes,14,3
+ F620,XINGFEI,A83_T,Android,arm64-v8a,Android6.0,Yes,Yes,Yes,No,14,3
+ Android,Hct,A120_N,Trustkernel,arm64-v8a armeabi,Android6.0,Yes,Yes,Yes,No,14,3
+-DOGE_A63,Kusai,A83_N,Android,arm64-v8a,Android6.0,Yes,Yes,Yes,No,14,3
++DOGE_A63,Kusai,A83_N,Android,arm64-v8a armeabi,Android6.0,Yes,Yes,Yes,No,14,3

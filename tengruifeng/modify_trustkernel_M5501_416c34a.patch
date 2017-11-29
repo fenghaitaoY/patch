@@ -1,0 +1,17 @@
+diff --git a/buildenv/service/trustkernel/make.sh b/buildenv/service/trustkernel/make.sh
+index cb3ebf0..b4b90c3 100755
+--- a/buildenv/service/trustkernel/make.sh
++++ b/buildenv/service/trustkernel/make.sh
+@@ -13,8 +13,8 @@ gcc_path="$binpath/gcc-linaro-6.1.1-2016.08-i686_arm-linux-gnueabihf/bin/"
+ export TA_KIT=`pwd`/ta_kit
+ export PATH=$PATH:$gcc_path
+ 
+-# make
+-make RELEASE=1 #不验证TA签名
++make
++#make RELEASE=1 #不验证TA签名
+ 
+ [ ! -d ../target/system/app/t6/ ] && mkdir -p ../target/system/app/t6/
+-cp out/edcf9395-3518-9067-614cafae2909775b.ta ../target/system/app/t6/
+\ No newline at end of file
++cp out/edcf9395-3518-9067-614cafae2909775b.ta ../target/system/app/t6/

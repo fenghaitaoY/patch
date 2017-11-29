@@ -1,0 +1,222 @@
+diff --git a/fingerprint/client/fingerprintso/ma_release_Jnifp.c b/fingerprint/client/fingerprintso/ma_release_Jnifp.c
+index 3b1d220..463e561 100644
+--- a/fingerprint/client/fingerprintso/ma_release_Jnifp.c
++++ b/fingerprint/client/fingerprintso/ma_release_Jnifp.c
+@@ -7,6 +7,8 @@
+ #include "config.h"
+ #include "../libfprint/interface/ca_interface.h"
+ #include "hw_auth_token.h"
++#include "../drivercontroller/driver_controller.h"
++#include "../process/process_extern_msg.h"
+ 
+ pthread_t thread;
+ JavaVM *m_vm;
+@@ -25,6 +27,7 @@ jfieldID resultFid;
+ jfieldID ecodeFid;
+ 
+ static int notify(fingerprint_t *fp);
++extern unsigned char *gp_driver_mmap;
+ 
+ //初始化的时候会调进来一次，在这个方法里持有jvm的引用
+ JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM *vm, void *reserved){
+@@ -306,3 +309,123 @@ JNIEXPORT jint JNICALL Java_ma_release_Jnifp_calibrate(JNIEnv *env, jclass cls){
+     return ret;
+     LOGD("end");
+ }
++
++ static unsigned int factory_test(unsigned int cmd) {
++ 	unsigned int ret=0, val=-1;
++ 	unsigned int tmpcmd = cmd | 0x80000000;
++ 	LOGD("%s start, cmd=%d, tmpcmd=0x%x", __func__, cmd, tmpcmd);
++ 	if (cmd == PUSH_CMD || cmd == POP_CMD) {
++         LOGD("%s WAKEUP_FINGERPRINTD", __func__);
++         ret = dc_send_cmd(WAKEUP_FINGERPRINTD);
++         if(ret != 0) {
++             return ret;
++         }
++     }
++     ret = dc_send_cmd_with_value(SET_MODE, &tmpcmd);
++     if(ret != 0) {
++         return ret;
++     }
++     ret = dc_send_cmd_with_value(WAIT_FINGERPRINTD_RESPONSE, &val);
++     if(ret != 0) {
++         return ret;
++     }
++ 	LOGD("%s end, ret=%d", __func__, val);
++ 	return val;
++ }
++
++ /* 结束测试
++  * @return 0成功
++  */
++ JNIEXPORT jint JNICALL  Java_ma_release_Jnifp_startFactoryTest(JNIEnv* env, jobject clazz) {
++ 	int ret = 0;
++ 	(void) env;
++ 	(void) clazz;
++ 	LOGD("%s \n",__func__);
++ 	ret = factory_test(PUSH_CMD);
++ 	if (ret == SUCCESS || ret == ERROR_REFRESH_FAIL_DO_FACTORY_TEST) {
++ 	    ret = 0;
++ 	}
++ 	return ret;
++ }
++
++ /* 开始测试
++  * @return 0成功
++  */
++ JNIEXPORT jint JNICALL Java_ma_release_Jnifp_stopFactoryTest(JNIEnv* env, jobject clazz) {
++ 	int ret = 0;
++ 	(void) env;
++ 	(void) clazz;
++ 	LOGD("%s \n",__func__);
++ 	ret = factory_test(POP_CMD);
++ 	if (ret == SUCCESS || ret == ERROR_NOTHING_TO_POP) {
++ 	    ret = 0;
++ 	}
++ 	return ret;
++ }
++
++ /* 获取图像
++  * @ image_out: 去背景图
++  * @ len: image_out的长度, 1k对齐
++  * @ return 0: 无按压, 1: 有按压
++  */
++ JNIEXPORT jint JNICALL Java_ma_release_Jnifp_getImage(JNIEnv *env, jclass cls, jbyteArray image_out, jint len) {
++     LOGD("start");
++     int ret = 0;
++     (void) env;
++     (void) cls;
++     if (len % 1024 != 0) {
++    	 LOGE("transfer error, length must be 1k formatted.");
++    	 return -1;
++     }
++     ret = factory_test(FACTORY_TEST_GET_IMAGE);
++     if (image_out != NULL) {
++         (*env)->SetByteArrayRegion(env, image_out, 0, len,
++        		 gp_driver_mmap +  len);
++     }
++     LOGD("end, ret= %d", ret);
++     return ret;
++ }
++
++ /* 获取产品码  */
++ JNIEXPORT jstring JNICALL Java_ma_release_Jnifp_getVendor(JNIEnv *env, jclass cls) {
++	 char buf[32];
++	 int ret = factory_test(FACTORY_TEST_GET_VENDOR);
++	 sprintf(buf, "%d", ret);
++	 return (*env)->NewStringUTF(env, buf);
++ }
++
++ JNIEXPORT jint JNICALL Java_ma_release_Jnifp_testDeadPixel
++(JNIEnv *env, jclass cls) {
++    LOGD("start");
++    int ret = 0;
++	(void) env;
++	(void) cls;
++	LOGD("%s \n",__func__);
++	ret = factory_test(FACTORY_TEST_DEADPIX);
++    LOGD("end. ret=%d", ret);
++    return ret;
++}
++
++ JNIEXPORT jint JNICALL Java_ma_release_Jnifp_testPress
++(JNIEnv *env, jclass cls) {
++    LOGD("start");
++    int ret = 0;
++	(void) env;
++	(void) cls;
++	LOGD("%s \n",__func__);
++	ret = factory_test(FACTORY_TEST_PRESS);
++    LOGD("end. ret=%d", ret);
++    return ret;
++}
++
++ JNIEXPORT jint JNICALL Java_ma_release_Jnifp_testInterrupt
++(JNIEnv *env, jclass cls) {
++    LOGD("start");
++    int ret = 0;
++	(void) env;
++	(void) cls;
++	LOGD("%s \n",__func__);
++	ret = factory_test(FACTORY_TEST_INTERRUPT);
++    LOGD("end. ret=%d", ret);
++    return ret;
++}
+diff --git a/fingerprint/client/fingerprintso/ma_release_Jnifp.h b/fingerprint/client/fingerprintso/ma_release_Jnifp.h
+index 405a6c1..76fecb3 100644
+--- a/fingerprint/client/fingerprintso/ma_release_Jnifp.h
++++ b/fingerprint/client/fingerprintso/ma_release_Jnifp.h
+@@ -103,6 +103,19 @@ JNIEXPORT jint JNICALL Java_ma_release_Jnifp_calibrate
+  */
+ JNIEXPORT jint JNICALL Java_ma_release_Jnifp_testSPI
+   (JNIEnv *, jclass);
++
++JNIEXPORT jint JNICALL Java_ma_release_Jnifp_startFactoryTest
++ (JNIEnv *, jclass);
++
++JNIEXPORT jint JNICALL Java_ma_release_Jnifp_stopFactoryTest
++ (JNIEnv *, jclass);
++
++JNIEXPORT jint JNICALL Java_ma_release_Jnifp_getImage
++ (JNIEnv *, jclass, jbyteArray, jint);
++
++JNIEXPORT jstring JNICALL Java_ma_release_Jnifp_getVendor
++ (JNIEnv *, jclass);
++
+ #ifdef __cplusplus
+ }
+ #endif
+diff --git a/fingerprint/service/soft_sensor/sensor96/sensor_wrapper.c b/fingerprint/service/soft_sensor/sensor96/sensor_wrapper.c
+index 42e1619..24f2f14 100644
+--- a/fingerprint/service/soft_sensor/sensor96/sensor_wrapper.c
++++ b/fingerprint/service/soft_sensor/sensor96/sensor_wrapper.c
+@@ -98,7 +98,7 @@ static int sensor_get_product_id(char *product_id, int *len) {
+ 	if (ret == SUCCESS) {
+ 		chip_id = sensor_get_chip_id();
+ 		num = g_config.cover_type;
+-		if (chip_id == 96) {
++		if (chip_id == 96 || chip_id == 112) {
+ 			snprintf(product_id, 6, "MA%02d%c", chip_id, cnum[num - 1]);
+ 			*len = 6;
+ 			ret = SUCCESS;
+@@ -533,7 +533,7 @@ static int algorithm96_enroll(void)
+         memset(g_enroll_ctx->max_image, 0, sizeof(g_enroll_ctx->max_image));
+         return ERROR_ENROLL_FAIL;
+     }
+-    if(g_config.filter_duplicate_enroll) {
++    /*if(g_config.filter_duplicate_enroll) {
+         if ( algorithm96_authenticate(&fid_count) ) { //注册时的验证fid_count为-1；匹配时的验证fidcount为0._
+             LOGD("duplicate finger.");
+             //清除max_image
+@@ -542,7 +542,7 @@ static int algorithm96_enroll(void)
+             memset(g_enroll_ctx->max_image, 0, sizeof(g_enroll_ctx->max_image));
+             return ERROR_ENROLL_DUPLICATE_FINGER;
+         }
+-    }
++    }*/
+ 
+     ret = alg96_enroll(g_enroll_ctx->template_data, TEMPLATE_NUM_A96, &area);
+     temp_num = alg96_getState(g_enroll_ctx->template_data, TEMPLATE_NUM_A96);
+@@ -552,7 +552,7 @@ static int algorithm96_enroll(void)
+     g_enroll_ctx->max_count = 0;
+     memset(g_enroll_ctx->max_image, 0, sizeof(g_enroll_ctx->max_image));
+ 
+-    if(ret < 2) {
++    if(ret < 1) {
+         if(g_init_enroll == 1) { //第一次注册区域失败不能报重复区域，只能报部分手指
+             LOGD("end. bad image.");
+             return ERROR_ENROLL_FAIL;
+diff --git a/version/test.csv b/version/test.csv
+index 62f00ae..c63c9c8 100644
+--- a/version/test.csv
++++ b/version/test.csv
+@@ -26,7 +26,7 @@ Default,Android,4.0.00,A121_N,Android,armeabi arm64-v8a,Android5.1,Yes,Yes,Yes,N
+ Default,Android,4.0.00,A83_N,Android,armeabi arm64-v8a,Android5.1,Yes,Yes,Yes,No,14,3
+ Default,Android,4.0.00,A83_T,Android,armeabi arm64-v8a,Android5.1,Yes,Yes,Yes,No,14,3
+ Default,Android,4.0.00,A80_T,Android,armeabi arm64-v8a,Android5.1,Yes,Yes,Yes,No,14,3
+-Default,Android,4.0.00,A96_N,Android,armeabi arm64-v8a,Android5.1,Yes,Yes,Yes,No,14,3
++Default,Android,4.0.00,A96_N,Android,armeabi arm64-v8a,Android5.1,Yes,Yes,Yes,No,10,3
+ Default,Android,4.0.00,A120_T,Android,armeabi arm64-v8a,Android5.1,Yes,Yes,Yes,No,14,3
+ Default,Android,4.0.00,A120_T,Android,armeabi arm64-v8a,Android6.0,Yes,Yes,Yes,No,14,3
+ Default,Android,4.0.00,A96_N,Trustonic,armeabi,Android6.0,Yes,Yes,Yes,No,14,3

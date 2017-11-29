@@ -1,0 +1,29 @@
+diff --git a/fingerprint/service/soft_sensor/sensor83/sensor_83.c b/fingerprint/service/soft_sensor/sensor83/sensor_83.c
+index ba0e3be..2768b62 100644
+--- a/fingerprint/service/soft_sensor/sensor83/sensor_83.c
++++ b/fingerprint/service/soft_sensor/sensor83/sensor_83.c
+@@ -46,9 +46,9 @@ int fp83_create(int cover_type)
+     LOGD("cover_type=%d\n", cover_type);
+     s_cover_type = cover_type;
+     if ( cover_type == COVER_S2) {
+-        platform_spi_set_speed(4);
++        platform_spi_set_speed(2);
+         context_set_sensor83_refdrv(0x3e);
+-        g_sensor83_grey_offset = 0x3f;
++        g_sensor83_grey_offset = 0x60;
+     } else if(cover_type == COVER_S3) {
+         platform_spi_set_speed(2);
+         context_set_sensor83_refdrv(0x3e);
+diff --git a/fingerprint/service/soft_sensor/sensor83/sensor_wrapper.c b/fingerprint/service/soft_sensor/sensor83/sensor_wrapper.c
+index ed3ecd1..84fa39b 100644
+--- a/fingerprint/service/soft_sensor/sensor83/sensor_wrapper.c
++++ b/fingerprint/service/soft_sensor/sensor83/sensor_wrapper.c
+@@ -693,7 +693,7 @@ match_again:
+ 	} else {
+ 		if (isMult == 1) {
+ 			isMult = 0;
+-			goto match_again;
++		//	goto match_again;
+ 		} else { //最后一次尝试失败打印
+             match_save_bmp(ret, char_num);
+ 			LOGD("score=%d, char_num=%d, matchArea=%d score_th=%d, ratio=%d\n",

@@ -1,0 +1,305 @@
+diff --git a/fingerprint/client/libfprint/Android.mk b/fingerprint/client/libfprint/Android.mk
+index a443426..4d4fac3 100644
+--- a/fingerprint/client/libfprint/Android.mk
++++ b/fingerprint/client/libfprint/Android.mk
+@@ -46,6 +46,7 @@ ifneq ($(filter E2_OVERSEA DOGE_A63, $(PRODUCT)),)
+ LOCAL_SRC_FILES += process/screen_status.c
+ endif
+ endif
++LOCAL_SRC_FILES += process/screen_status.c
+ 
+ LOCAL_ARM_MODE := arm	
+ 
+diff --git a/fingerprint/client/libfprint/drivercontroller/driver_controller.c b/fingerprint/client/libfprint/drivercontroller/driver_controller.c
+index fb67129..9ba5c34 100644
+--- a/fingerprint/client/libfprint/drivercontroller/driver_controller.c
++++ b/fingerprint/client/libfprint/drivercontroller/driver_controller.c
+@@ -83,14 +83,14 @@ int dc_send_cmd(int cmd)
+ //    wbuf[1] = (cmd) & 0xff;
+ //    write(g_device_fd, wbuf, 6);
+ 
+-    while(1) {
++    //while(1) {
+         ret = ioctl(g_device_fd, cmd);
+         if((cmd == WAIT_FACTORY_CMD || cmd == SLEEP) && (ret != 0)) {
+             ALOGE("%s, cmd=0x%x, ret=%d", __func__, cmd, ret);
+         } else {
+-            break;
++            //break;
+         }
+-    }
++    //}
+ 	return 0;
+ }
+ 
+diff --git a/fingerprint/client/libfprint/include/globalvar.h b/fingerprint/client/libfprint/include/globalvar.h
+index 134ada3..25a0667 100644
+--- a/fingerprint/client/libfprint/include/globalvar.h
++++ b/fingerprint/client/libfprint/include/globalvar.h
+@@ -13,18 +13,10 @@
+ #include <hardware/fingerprint.h>
+ 
+ enum fp_acquired_info {
+-	// FINGERPRINT_ACQUIRED_VENDOR_BASE = 1000,
+-	FINGERPRINT_ACQUIRED_FINGER_DOWN = FINGERPRINT_ACQUIRED_VENDOR_BASE + 2,
+-	FINGERPRINT_ACQUIRED_FINGER_UP = FINGERPRINT_ACQUIRED_VENDOR_BASE + 3,
+-
+-#ifdef OEM_CHUANYIN
+-	FINGERPRINT_ACQUIRED_ALI_BASE = 1000,
+-#else
+ 	FINGERPRINT_ACQUIRED_ALI_BASE = 1100,
+-#endif
+ 	FINGERPRINT_ACQUIRED_WAIT_FINGER_INPUT = FINGERPRINT_ACQUIRED_ALI_BASE + 1,
+-	// FINGERPRINT_ACQUIRED_FINGER_DOWN = FINGERPRINT_ACQUIRED_ALI_BASE + 2,
+-	// FINGERPRINT_ACQUIRED_FINGER_UP = FINGERPRINT_ACQUIRED_ALI_BASE + 3,
++	FINGERPRINT_ACQUIRED_FINGER_DOWN = FINGERPRINT_ACQUIRED_ALI_BASE + 2,
++	FINGERPRINT_ACQUIRED_FINGER_UP = FINGERPRINT_ACQUIRED_ALI_BASE + 3,
+ 	FINGERPRINT_ACQUIRED_INPUT_TOO_LONG = FINGERPRINT_ACQUIRED_ALI_BASE + 4,
+ 	FINGERPRINT_ACQUIRED_DUPLICATE_FINGER = FINGERPRINT_ACQUIRED_ALI_BASE + 5,
+ 	FINGERPRINT_ACQUIRED_DUPLICATE_AREA = FINGERPRINT_ACQUIRED_ALI_BASE + 6,
+@@ -39,7 +31,6 @@ extern hw_auth_token_t *gHat;
+ extern microarray_properties_t g_config;
+ extern int s_chip_id;
+ extern unsigned int g_driver_version;
+-
+ extern int g_auth_num;
+ extern int g_auth_image_num;
+ 
+diff --git a/fingerprint/client/libfprint/interface/ca_interface.c b/fingerprint/client/libfprint/interface/ca_interface.c
+index 7550eee..7d25f52 100644
+--- a/fingerprint/client/libfprint/interface/ca_interface.c
++++ b/fingerprint/client/libfprint/interface/ca_interface.c
+@@ -91,9 +91,9 @@ int bio_init(void)
+     ma_tac_get_energy();//get bkg for factory test get image.
+ 
+     refresh_timer(g_config.is_sensor_changed);
+-#if (defined(PRODUCT_E2_OVERSEA) && defined(OEM_KONKA)) || (defined(PRODUCT_DOGE_A163) && defined(OEM_KUSAI))
++//#if (defined(PRODUCT_E2_OVERSEA) && defined(OEM_KONKA)) || (defined(PRODUCT_DOGE_A163) && defined(OEM_KUSAI))
+     start_screen_status_process();
+-#endif
++//#endif
+ 
+     if(g_config.cover_type == COVER_S3 && g_config.sid03_key_func == 1) {
+         start_process_sid03_interrupt();
+@@ -259,7 +259,8 @@ int bio_enroll(uint32_t gid, uint32_t timeout_sec,const hw_auth_token_t *token)
+     // warning const set to unconst
+     cmd_enrollcalibrate.token = token;
+     enqueue_cmd(enrollcalibrate_work, (void*)&cmd_enrollcalibrate, PROCESS_ENROLLCALIBRATE);
+-    LOGD("end.");
++    LOGD("end.\n");
++
+     return 0;
+ }
+ 
+@@ -348,16 +349,17 @@ int bio_close(void)
+ {
+     g_bio_status.is_fp_canceled = 0;
+     g_bio_status.is_bio_inited = 0;
++
+     stop_process();
+     stop_process_extern_msg();
+     refresh_stop();
+     if(g_config.cover_type == COVER_S3 && g_config.sid03_key_func == 1) {
+         stop_process_sid03_interrupt();
+     }
+-#if defined(PRODUCT_E2_OVERSEA) && defined(OEM_KONKA)
++//#if defined(PRODUCT_E2_OVERSEA) && defined(OEM_KONKA)
+     stop_screen_status_process();
+-#endif
+-    return SUCCESS;
++//#endif
++    return 0;
+ }
+ 
+ /*枚举指纹
+diff --git a/fingerprint/client/libfprint/process/authenticate.c b/fingerprint/client/libfprint/process/authenticate.c
+index 942bc07..d7fce2c 100644
+--- a/fingerprint/client/libfprint/process/authenticate.c
++++ b/fingerprint/client/libfprint/process/authenticate.c
+@@ -300,6 +300,7 @@ void* authenticate_work(void *q) {
+ void* authenticate_detect_work(void *q)
+ {
+     int r = 0, press_ok = 0;
++	int chipid = -1,esdfail_num = 0;
+     const int ERROR_IMAGE_COUNT = 4;
+     static int s_error_image_count = 0;
+     static int s_error_trigger_count;
+@@ -338,6 +339,34 @@ void* authenticate_detect_work(void *q)
+             //TODO  change the logic/
+             LOGD("go to kernel\n");
+             dc_send_cmd(SLEEP);
++#if defined(A83) || defined(A80)			
++			//esd procedure START
++			chipid = ma_tac_factory_get_vendor();
++			LOGD("resume1 chipid=%d \n",chipid);
++
++			while(chipid != 0x53 && chipid != 0x50) {
++				if (qe->cancelled) {
++					LOGD(" esd  authenticate cancelled\n");
++					return NULL;
++				}
++				LOGD("-----esd while -----");
++				dc_send_cmd(SCREEN_OFF);
++
++				if(esdfail_num > 2){
++					usleep(50000);
++				}else{
++					usleep(5000);
++				}
++
++				dc_send_cmd(SCREEN_ON);
++
++				chipid = ma_tac_factory_get_vendor();
++				esdfail_num++;
++				LOGD("resume2 chipid=%d \n",chipid);
++			}
++			esdfail_num = 0;
++			//esd procedure END
++#endif
+             if ( qe->cancelled ) {
+                 LOGD("command cancelled\n");
+                 return 0;
+diff --git a/fingerprint/client/libfprint/process/enrollcalibrate.c b/fingerprint/client/libfprint/process/enrollcalibrate.c
+index c468f1b..9681bb8 100644
+--- a/fingerprint/client/libfprint/process/enrollcalibrate.c
++++ b/fingerprint/client/libfprint/process/enrollcalibrate.c
+@@ -148,9 +148,7 @@ void* enrollcalibrate_work(void * q)
+                             enroll_notify(cmd_enroll->gid, fid, percentage, 1000);
+                             percentage -= 1;
+                         } else {
+-                            //acquired_event_notify(FINGERPRINT_ACQUIRED_LOW_COVER);
+-                        	acquired_event_notify(FINGERPRINT_ACQUIRED_PARTIAL);
+-
++                            acquired_event_notify(FINGERPRINT_ACQUIRED_LOW_COVER);
+ #if (defined (OEM_MAISUI) && defined (A80))
+                             enroll_notify(cmd_enroll->gid, fid, percentage, 1000);
+                             if (percentage <= 0) {
+diff --git a/fingerprint/client/libfprint/process/navigate.c b/fingerprint/client/libfprint/process/navigate.c
+index a64c94f..8575c47 100644
+--- a/fingerprint/client/libfprint/process/navigate.c
++++ b/fingerprint/client/libfprint/process/navigate.c
+@@ -109,7 +109,9 @@ void * navigate_work(void *q) {
+     static uint64_t tap_down_time = 0;
+     uint64_t diff=0, now_time = 0;
+     int need_report_long_tap = 0;
+-
++   uint32_t fids[FINGERPRINT_SIZE];
++    int fid_count = 0;
++    memset(fids, 0, sizeof(fids));
+ #ifdef SAVE_NAVI_BMP
+     context_set_sensor88_navicount(0);
+ #endif
+@@ -130,11 +132,21 @@ void * navigate_work(void *q) {
+         ma_tac_init_navigate();
+         count = 0;
+         tap_result = NAVI_NONE;
++//add for hct screenon
++        ma_tac_enumerate(g_config.active_group, fids, &fid_count);
++//end for hct screenon
+ 		do {
+ 			tap_result = ma_tac_navigate_tap(tap_result);
+ 			if (tap_result & NAVI_TAP_DOWN) {
++//add for hct screenon
+ 				if(count == 0) {
+ 					need_report_long_tap = 1;
++//add for hct screenon
++                if(fid_count ==0){
++                    LOGD(" no finger send double tap");
++                    dc_send_cmd(DOUBLE_TAP);
++                }
++//end for hct screenon
+ 					report_navi_result(NAVI_TAP_DOWN);
+ 					gettimeofday(&curr_time, NULL);
+ 					tap_down_time = curr_time.tv_sec * 1000 + curr_time.tv_usec / 1000;
+diff --git a/fingerprint/client/libfprint/process/process.c b/fingerprint/client/libfprint/process/process.c
+index 2bc9abc..a4bb4e9 100644
+--- a/fingerprint/client/libfprint/process/process.c
++++ b/fingerprint/client/libfprint/process/process.c
+@@ -111,6 +111,7 @@ static void *fingerprint_hal_main_thread(void *p)
+     (void) p;
+ 
+     init_cmd_fifo2();
++	int chipid = -1,esdfail_num = 0;
+     init_navigate();
+     // endless
+     while ( 1 )
+@@ -122,7 +123,25 @@ static void *fingerprint_hal_main_thread(void *p)
+             break;
+         }
+         LOGD("Command %s is running\n", _num2string(qe->state));
+-
++#if defined(A83) || defined(A80)
++		//esd procedure START
++		chipid = ma_tac_factory_get_vendor();
++		LOGD("read chipid = %d !!!!!!!!!", chipid);
++		while (chipid != 0x53 && chipid != 0x50) {
++            dc_send_cmd(SCREEN_OFF);
++            if(esdfail_num > 2){
++                usleep(50000);
++            }else{
++                usleep(5000);
++            }
++            dc_send_cmd(SCREEN_ON);
++            esdfail_num++;
++		    chipid = ma_tac_factory_get_vendor();
++			LOGD("--- esd --power reset !!!!!!!!!!!");
++		}
++        esdfail_num = 0;
++		//esd procedure END
++#endif
+         qe->cmd_process(qe);
+        // ma_tac_calc_interrupt_para();
+         if(sThreadExit){
+diff --git a/fingerprint/client/libfprint/process/screen_status.c b/fingerprint/client/libfprint/process/screen_status.c
+index ced2c18..cb8e669 100644
+--- a/fingerprint/client/libfprint/process/screen_status.c
++++ b/fingerprint/client/libfprint/process/screen_status.c
+@@ -20,6 +20,7 @@ static void *screen_status_thread(void *p)
+ #elif defined(PRODUCT_DOGE_A63) && defined(OEM_KUSAI)
+     const int default_ck_period = DEFAULT_CK_PERIOD_A83;
+ #endif
++    const int default_ck_period = DEFAULT_CK_PERIOD_A83;
+     int ck_period = property_get_int32(KEY_CK_PERIOD, default_ck_period);
+     while(1) {
+         if (s_thread_exit) {
+diff --git a/fingerprint/include/protocol.h b/fingerprint/include/protocol.h
+index db4ade2..3270416 100644
+--- a/fingerprint/include/protocol.h
++++ b/fingerprint/include/protocol.h
+@@ -180,7 +180,7 @@ typedef union {
+         uint32_t cha_l;
+ 		int unused;
+ 		int count_down;
+-		long time;
++		uint64_t time;
+ 		hw_auth_token_t hat;
+ 	} request;
+ 	struct {
+diff --git a/fingerprint/service/soft_sensor/sensor83/wrapper_v2.c b/fingerprint/service/soft_sensor/sensor83/wrapper_v2.c
+index 023e2b6..7c20889 100644
+--- a/fingerprint/service/soft_sensor/sensor83/wrapper_v2.c
++++ b/fingerprint/service/soft_sensor/sensor83/wrapper_v2.c
+@@ -209,10 +209,10 @@ static int algorithm83_enroll(void) {
+     //4 enroll
+     descriptor_num = (int *)g83_ctx2->fng_tpl;
+     result = pvm_enroll(g83_ctx2->fng_tpl + 8, descriptor_num, g83_enroll_ctx->area, 20);
+-    if(result==1) {
++    /*if(result==1) {
+          ret = ERROR_ENROLL_DUPLICATE_AREA;
+          goto clear;
+-    }
++    }*/
+ 
+     //5. clear context
+ clear:
+diff --git a/version/product.csv b/version/product.csv
+index 18af8d2..dedf68a 100644
+--- a/version/product.csv
++++ b/version/product.csv
+@@ -20,5 +20,6 @@ A156,Yude,A121_N,Trustonic,armeabi arm64-v8a,Android6.0,Yes,Yes,Yes,No,14,3
+ Z285,Yude,A121_N,Trustkernel,arm64-v8a,Android6.0,Yes,Yes,Yes,Yes,14,3
+ F620,XINGFEI,A83_T,Android,arm64-v8a,Android6.0,Yes,Yes,Yes,No,14,3
+ Android,Hct,A120_N,Trustkernel,arm64-v8a armeabi,Android6.0,Yes,Yes,Yes,No,14,3
++Android,Hct,A83_T,Trustkernel,arm64-v8a armeabi,Android6.0,Yes,Yes,Yes,No,14,3
+ DOGE_A63,Kusai,A83_N,Android,arm64-v8a,Android6.0,Yes,Yes,Yes,No,14,3
+ isharkL2,ZhanXun,A83_N,Watchtrust,x86_64,Android6.0,Yes,Yes,Yes,No,12,3

@@ -1,0 +1,52 @@
+diff --git a/fingerprint/client/libfprint/interface/ca_interface.c b/fingerprint/client/libfprint/interface/ca_interface.c
+index 7550eee..d77b122 100644
+--- a/fingerprint/client/libfprint/interface/ca_interface.c
++++ b/fingerprint/client/libfprint/interface/ca_interface.c
+@@ -91,7 +91,7 @@ int bio_init(void)
+     ma_tac_get_energy();//get bkg for factory test get image.
+ 
+     refresh_timer(g_config.is_sensor_changed);
+-#if (defined(PRODUCT_E2_OVERSEA) && defined(OEM_KONKA)) || (defined(PRODUCT_DOGE_A163) && defined(OEM_KUSAI))
++#if (defined(PRODUCT_E2_OVERSEA) && defined(OEM_KONKA)) || (defined(PRODUCT_DOGE_A63) && defined(OEM_KUSAI))
+     start_screen_status_process();
+ #endif
+ 
+diff --git a/fingerprint/client/libfprint/process/authenticate.c b/fingerprint/client/libfprint/process/authenticate.c
+index 942bc07..8a7ebbc 100644
+--- a/fingerprint/client/libfprint/process/authenticate.c
++++ b/fingerprint/client/libfprint/process/authenticate.c
+@@ -105,6 +105,9 @@ static int verify(struct cmd_entry *qe)
+         }
+         if (fid) {
+             dc_send_cmd(TIMEOUT_WAKELOCK);
++#if defined(OEM_KUSAI)
++            dc_send_cmd(MA_KEY_F14);
++#endif
+             authenticate_notify(cmd_auth->gid, fid, &g_bio_context.auth_token);
+             gettimeofday(&now,NULL);
+ 
+diff --git a/fingerprint/client/libfprint/process/enrollcalibrate.c b/fingerprint/client/libfprint/process/enrollcalibrate.c
+index c468f1b..f87391f 100644
+--- a/fingerprint/client/libfprint/process/enrollcalibrate.c
++++ b/fingerprint/client/libfprint/process/enrollcalibrate.c
+@@ -110,7 +110,7 @@ void* enrollcalibrate_work(void * q)
+                     	LOGD("do nothing");
+                     } else if (ret == ERROR_EXTRACT_FAIL) {
+                         LOGD("image extract fail.");
+-                        acquired_event_notify(FINGERPRINT_ACQUIRED_INSUFFICIENT);
++                        //acquired_event_notify(FINGERPRINT_ACQUIRED_INSUFFICIENT);
+                     } else if (ret == ERROR_ENROLL_DUPLICATE_AREA) {
+                     	duplicate_area_num++;
+                     	if(duplicate_area_num<6) {
+diff --git a/version/product.csv b/version/product.csv
+index 18af8d2..2b46f95 100644
+--- a/version/product.csv
++++ b/version/product.csv
+@@ -20,5 +20,6 @@ A156,Yude,A121_N,Trustonic,armeabi arm64-v8a,Android6.0,Yes,Yes,Yes,No,14,3
+ Z285,Yude,A121_N,Trustkernel,arm64-v8a,Android6.0,Yes,Yes,Yes,Yes,14,3
+ F620,XINGFEI,A83_T,Android,arm64-v8a,Android6.0,Yes,Yes,Yes,No,14,3
+ Android,Hct,A120_N,Trustkernel,arm64-v8a armeabi,Android6.0,Yes,Yes,Yes,No,14,3
+-DOGE_A63,Kusai,A83_N,Android,arm64-v8a,Android6.0,Yes,Yes,Yes,No,14,3
++DOGE_A63,Kusai,A83_N,Android,arm64-v8a armeabi,Android6.0,Yes,Yes,Yes,No,14,3
++DOGE_A63,Kusai,A83_N,Trustkernel,arm64-v8a armeabi,Android6.0,Yes,Yes,Yes,No,14,3
+ isharkL2,ZhanXun,A83_N,Watchtrust,x86_64,Android6.0,Yes,Yes,Yes,No,12,3
