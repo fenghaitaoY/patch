@@ -1,0 +1,167 @@
+diff --git a/fingerprint/client/libfprint/Android.mk b/fingerprint/client/libfprint/Android.mk
+index a694377..30b2c19 100644
+--- a/fingerprint/client/libfprint/Android.mk
++++ b/fingerprint/client/libfprint/Android.mk
+@@ -42,9 +42,9 @@ LOCAL_SRC_FILES += \
+ endif
+ ifeq ($(OEM), Konka)
+ ifeq ($(PRODUCT), E2_OVERSEA)
+-LOCAL_SRC_FILES += process/screen_status.c
+ endif
+ endif
++LOCAL_SRC_FILES += process/screen_status.c
+ 
+ LOCAL_ARM_MODE := arm	
+ 
+diff --git a/fingerprint/client/libfprint/include/globalvar.h b/fingerprint/client/libfprint/include/globalvar.h
+index 5e2b231..9025a9b 100644
+--- a/fingerprint/client/libfprint/include/globalvar.h
++++ b/fingerprint/client/libfprint/include/globalvar.h
+@@ -29,6 +29,7 @@ extern hw_auth_token_t *gHat;
+ extern microarray_properties_t g_config;
+ extern int s_chip_id;
+ extern unsigned int g_driver_version;
++extern int g_screen_status;
+ 
+ #ifdef TAC_DEBUG_SAVE_FILE
+ extern int g_auth_num;
+diff --git a/fingerprint/client/libfprint/interface/ca_interface.c b/fingerprint/client/libfprint/interface/ca_interface.c
+index 5e0e802..fa62195 100644
+--- a/fingerprint/client/libfprint/interface/ca_interface.c
++++ b/fingerprint/client/libfprint/interface/ca_interface.c
+@@ -288,8 +288,8 @@ int bio_init(void)
+     ma_tac_get_energy();//get bkg for factory test get image.
+     refresh_timer();
+ #if defined(PRODUCT_E2_OVERSEA) && defined(OEM_KONKA)
+-    start_screen_status_process();
+ #endif
++    start_screen_status_process();
+ 
+     if(g_config.cover_type == COVER_S3 && g_config.sid03_key_func == 1) {
+         start_process_sid03_interrupt();
+@@ -340,8 +340,8 @@ int bio_close(void)
+         stop_process_sid03_interrupt();
+     }
+ #if defined(PRODUCT_E2_OVERSEA) && defined(OEM_KONKA)
+-    stop_screen_status_process();
+ #endif
++    stop_screen_status_process();
+     return 0;
+ }
+ 
+diff --git a/fingerprint/client/libfprint/process/navigate.c b/fingerprint/client/libfprint/process/navigate.c
+index 934a6bd..3f4b451 100644
+--- a/fingerprint/client/libfprint/process/navigate.c
++++ b/fingerprint/client/libfprint/process/navigate.c
+@@ -106,6 +106,9 @@ void * navigate_work(void *q)
+             LOGD("command cancelled\n");
+             return NULL;
+         }
++        if(g_screen_status == 0){
++            continue;
++        }
+         ma_tac_init_navigate();
+         down_count = 0;
+         tap_result = NAVI_NONE;
+diff --git a/fingerprint/client/libfprint/process/screen_status.c b/fingerprint/client/libfprint/process/screen_status.c
+index 15d25a6..4acace5 100644
+--- a/fingerprint/client/libfprint/process/screen_status.c
++++ b/fingerprint/client/libfprint/process/screen_status.c
+@@ -4,7 +4,7 @@
+ 
+ static int s_thread_exit = 0;
+ static pthread_t g_tid_screenstatus;
+-
++int g_screen_status = 0;
+ #define SCREEN_STATUS_OFF  0
+ #define SCREEN_STATUS_ON   1
+ 
+@@ -31,6 +31,7 @@ static void *screen_status_thread(void *p)
+                 ma_tac_update_config(&g_config);
+                 pop_cmd_leave_factory_test();
+             }
++            g_screen_status = 0;
+             break;
+         case SCREEN_STATUS_ON:
+             LOGD("screen on.");
+@@ -41,6 +42,7 @@ static void *screen_status_thread(void *p)
+                 ma_tac_update_config(&g_config);
+                 pop_cmd_leave_factory_test();
+             }
++            g_screen_status = 1;
+             break;
+         default:
+             LOGD("get screen status bump.");
+diff --git a/fingerprint/include/config.h b/fingerprint/include/config.h
+index fc890e1..f7027d5 100644
+--- a/fingerprint/include/config.h
++++ b/fingerprint/include/config.h
+@@ -138,8 +138,8 @@ enum fp_command_info {
+ #define DEFAULT_AUTHENTICATE_LEVEL_A80                  4
+ #define DEFAULT_AUTHENTICATE_CHARACTERISTIC_NUM_A80     1
+ #define DEFAULT_INTERRUPT_TH_A80                        10
+-#define DEFAULT_CK_PERIOD_A80                           1
+ #endif
++#define DEFAULT_CK_PERIOD_A80                           1
+ 
+ #ifdef A88
+ #define DEFAULT_ENERGY_THRESHOLD_A88                    200
+diff --git a/fingerprint/service/soft_sensor/sensor83/sensor_wrapper.c b/fingerprint/service/soft_sensor/sensor83/sensor_wrapper.c
+index ed3ecd1..52dbd2c 100644
+--- a/fingerprint/service/soft_sensor/sensor83/sensor_wrapper.c
++++ b/fingerprint/service/soft_sensor/sensor83/sensor_wrapper.c
+@@ -450,21 +450,21 @@ static int algorithm83_press_detect_texture(void *image, int type) {
+ 	    ret = (sratio > 25) ? NORMAL_PRESSED : NORMAL_UNPRESSED;
+ 	    break;
+ 	}
+-//	if (ret == NORMAL_PRESSED) {
+-//		fp83_remove_bkg(image_in, context_get_sensor83_bkg(),
+-//			g_auth_ctx->remove_bkg_img, g_enroll_ctx->proc_buf, g_sensor83_grey_offset);
+-//		if ((count - g_enroll_ctx->max_count) > (SIZE - g_enroll_ctx->max_count) / 10) {
+-//			memcpy(g_enroll_ctx->max_image, image_in, sizeof(g_enroll_ctx->max_image));
+-//			g_enroll_ctx->max_count = count;
+-//		}
+-//	} else {
+-//	    s_cnt_base = 0;
+-//	    s_cnt_img = 0;
+-//	    g_enroll_ctx->max_count = 0;
+-//	    memset(g_enroll_ctx->max_image, 0, sizeof(g_enroll_ctx->max_image));
+-//	}
+-
+-	if(type==AUTHENTICATE_DETECT) {
++	if (ret == NORMAL_PRESSED) {
++		fp83_remove_bkg(image_in, context_get_sensor83_bkg(),
++			g_auth_ctx->remove_bkg_img, g_enroll_ctx->proc_buf, g_sensor83_grey_offset);
++		if ((count - g_enroll_ctx->max_count) > (SIZE - g_enroll_ctx->max_count) / 10) {
++			memcpy(g_enroll_ctx->max_image, image_in, sizeof(g_enroll_ctx->max_image));
++			g_enroll_ctx->max_count = count;
++		}
++	} else {
++	    s_cnt_base = 0;
++	    s_cnt_img = 0;
++	    g_enroll_ctx->max_count = 0;
++	    memset(g_enroll_ctx->max_image, 0, sizeof(g_enroll_ctx->max_image));
++	}
++
++/*	if(type==AUTHENTICATE_DETECT) {
+ 		ret = select_image(sratio, image_in);
+ 	} else {
+ 		if(ret==NORMAL_PRESSED) {
+@@ -476,7 +476,7 @@ static int algorithm83_press_detect_texture(void *image, int type) {
+ 			}
+ 		}
+ 	}
+-
++*/
+ 	LOGD("count=%d ratio=%d, ret=%d grey offset=0x%x\n", count, sratio, ret, g_sensor83_grey_offset);
+ 
+ 	return ret;
+@@ -693,7 +693,7 @@ match_again:
+ 	} else {
+ 		if (isMult == 1) {
+ 			isMult = 0;
+-			goto match_again;
++			//goto match_again;
+ 		} else { //最后一次尝试失败打印
+             match_save_bmp(ret, char_num);
+ 			LOGD("score=%d, char_num=%d, matchArea=%d score_th=%d, ratio=%d\n",

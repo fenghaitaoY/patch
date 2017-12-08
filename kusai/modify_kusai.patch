@@ -116,15 +116,46 @@ index c468f1b..f87391f 100644
                      } else if (ret == ERROR_ENROLL_DUPLICATE_AREA) {
                      	duplicate_area_num++;
                      	if(duplicate_area_num<6) {
+diff --git a/fingerprint/include/config.h b/fingerprint/include/config.h
+index 7ecf8c2..d3a82ee 100644
+--- a/fingerprint/include/config.h
++++ b/fingerprint/include/config.h
+@@ -154,13 +154,13 @@ typedef unsigned char imgType;
+ #define DEFAULT_AUTHENTICATE_LEVEL_A83                  4
+ #define DEFAULT_AUTHENTICATE_CHAR_NUM_A83     			2
+ #define DEFAULT_AUTHENTICATE_UPDATE_CHAR_NUM_A83     	3
+-#define DEFAULT_CK_PERIOD_A83                           1
+ #ifdef  PLATFORM_TRUSTY
+ #define TEMPLATE_NUM_A83                                40
+ #else
+ #define TEMPLATE_NUM_A83                                60
+ #endif
+ #endif
++#define DEFAULT_CK_PERIOD_A83                           1
+ 
+ #ifdef A82
+ //#define TEMPLATE_SIZE 2772
+diff --git a/fingerprint/service/protocol/protocol.c b/fingerprint/service/protocol/protocol.c
+index 7698535..ff5fff1 100644
+--- a/fingerprint/service/protocol/protocol.c
++++ b/fingerprint/service/protocol/protocol.c
+@@ -72,7 +72,7 @@ static void protocol_service_init(protocol_service_init_t *data)
+     image_size = s_sensor->image_size;
+     sensor_create(&g_config);
+     memcpy(&data->response.config, &g_config, sizeof(microarray_properties_t));
+-    LOGD("alg pvm version = %s", pvm_getVersion());
++    //LOGD("alg pvm version = %s", pvm_getVersion());
+ 
+     data->response.err = 0;
+     is_inited = 1;
 diff --git a/version/product.csv b/version/product.csv
-index 18af8d2..2b46f95 100644
+index 58a70d4..6e5cd4e 100644
 --- a/version/product.csv
 +++ b/version/product.csv
-@@ -20,5 +20,6 @@ A156,Yude,A121_N,Trustonic,armeabi arm64-v8a,Android6.0,Yes,Yes,Yes,No,14,3
+@@ -20,4 +20,5 @@ A156,Yude,A121_N,Trustonic,armeabi arm64-v8a,Android6.0,Yes,Yes,Yes,No,14,3
  Z285,Yude,A121_N,Trustkernel,arm64-v8a,Android6.0,Yes,Yes,Yes,Yes,14,3
  F620,XINGFEI,A83_T,Android,arm64-v8a,Android6.0,Yes,Yes,Yes,No,14,3
  Android,Hct,A120_N,Trustkernel,arm64-v8a armeabi,Android6.0,Yes,Yes,Yes,No,14,3
 -DOGE_A63,Kusai,A83_N,Android,arm64-v8a,Android6.0,Yes,Yes,Yes,No,14,3
-+DOGE_A63,Kusai,A83_N,Android,arm64-v8a armeabi,Android6.0,Yes,Yes,Yes,No,14,3
-+DOGE_A63,Kusai,A83_N,Trustkernel,arm64-v8a armeabi,Android6.0,Yes,Yes,Yes,No,14,3
- isharkL2,ZhanXun,A83_N,Watchtrust,x86_64,Android6.0,Yes,Yes,Yes,No,12,3
++DOGE_A63,Kusai,A121_N&A120_N,Android,arm64-v8a armeabi,Android6.0,Yes,Yes,Yes,No,14,3
++DOGE_A63,Kusai,A121_N&A120_N,Trustkernel,arm64-v8a armeabi,Android6.0,Yes,Yes,Yes,No,14,3
