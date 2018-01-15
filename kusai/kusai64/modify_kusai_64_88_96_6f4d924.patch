@@ -1,0 +1,3475 @@
+diff --git a/driver/android6.0/ioctl_cmd.h b/driver/android6.0/ioctl_cmd.h
+index 99836de..650f781 100644
+--- a/driver/android6.0/ioctl_cmd.h
++++ b/driver/android6.0/ioctl_cmd.h
+@@ -63,6 +63,7 @@
+ #define MA_POWER_ON             _IO(MA_IOC_MAGIC, 49)
+ #define MA_SID03_REPORT_KEY_ONE        _IO(MA_IOC_MAGIC, 50)
+ #define MA_SID03_REPORT_KEY_TWO        _IO(MA_IOC_MAGIC, 51)
++#define HAL_SET_VERSION_INFO           _IOW(MA_IOC_MAGIC,   52, unsigned int)
+ 
+ #endif /* __IOCTL_CMD_H__ */
+ 
+diff --git a/fingerprint/client/libfprint/interface/ca_interface.c b/fingerprint/client/libfprint/interface/ca_interface.c
+index 93bd5e1..0ad4c72 100644
+--- a/fingerprint/client/libfprint/interface/ca_interface.c
++++ b/fingerprint/client/libfprint/interface/ca_interface.c
+@@ -23,6 +23,8 @@ bio_status_t g_bio_status = {0};
+ bio_context_t g_bio_context = {0};
+ int g_work_enroll = 0;
+ 
++void set_version_info_to_driver();
++
+ /*hal层的准备工作
+  * @return 0:success
+  */
+@@ -78,6 +80,7 @@ int bio_init(void)
+         LOGE("tac init error, ret=%d", ret);
+         return ret;
+     }
++    set_version_info_to_driver();
+     start_process();
+     start_process_extern_msg();
+     LOGD("setting default active group.");
+@@ -90,7 +93,7 @@ int bio_init(void)
+     ma_tac_get_energy();//get bkg for factory test get image.
+ 
+     refresh_timer(g_config.is_sensor_changed);
+-#if (defined(PRODUCT_E2_OVERSEA) && defined(OEM_KONKA)) || (defined(PRODUCT_DOGE_A163) && defined(OEM_KUSAI))
++#if (defined(PRODUCT_E2_OVERSEA) && defined(OEM_KONKA)) || (defined(PRODUCT_DOGE_A63) && defined(OEM_KUSAI))
+     start_screen_status_process();
+ #endif
+ 
+@@ -103,6 +106,29 @@ int bio_init(void)
+ }
+ 
+ 
++void set_version_info_to_driver()
++{
++    char version_info[64];
++
++    memset(&version_info, 0, sizeof(version_info));
++    version_info[0] = 1;
++    sprintf(&version_info[1], "afs%d", g_bio_context.chip_id);
++    dc_send_cmd_with_value(HAL_SET_VERSION_INFO, (int*)version_info);
++    memset(&version_info, 0, sizeof(version_info));
++
++    version_info[0] = 2;
++    sprintf(&version_info[1], "%s_%s_%s_%s",OEM,SUPPORT_SENSOR,BUILD_VERSION,GIT_SHORT_VERSION);
++    dc_send_cmd_with_value(HAL_SET_VERSION_INFO, (int*)version_info);
++    memset(&version_info, 0, sizeof(version_info));
++
++    version_info[0] = 3;
++    sprintf(&version_info[1], "Microarray");
++    dc_send_cmd_with_value(HAL_SET_VERSION_INFO, (int*)version_info);
++
++    version_info[0] = 4;
++    sprintf(&version_info[1], "%s-%s", COMPILE_USER, COMPILE_DATE);
++    dc_send_cmd_with_value(HAL_SET_VERSION_INFO, (int*)version_info);
++}
+ 
+ 
+ 
+diff --git a/fingerprint/client/libfprint/process/authenticate.c b/fingerprint/client/libfprint/process/authenticate.c
+index 99d65c4..cf84e25 100644
+--- a/fingerprint/client/libfprint/process/authenticate.c
++++ b/fingerprint/client/libfprint/process/authenticate.c
+@@ -108,6 +108,9 @@ static int verify(struct cmd_entry *qe)
+         }
+         if (fid) {
+             dc_send_cmd(TIMEOUT_WAKELOCK);
++#if defined(OEM_KUSAI)
++            dc_send_cmd(MA_KEY_F14);
++#endif
+             authenticate_notify(cmd_auth->gid, fid, &g_bio_context.auth_token);
+             gettimeofday(&now,NULL);
+ 
+diff --git a/fingerprint/client/libfprint/process/enroll.c b/fingerprint/client/libfprint/process/enroll.c
+index 74040d1..8b26c0f 100644
+--- a/fingerprint/client/libfprint/process/enroll.c
++++ b/fingerprint/client/libfprint/process/enroll.c
+@@ -111,7 +111,7 @@ void* enroll_work(void * q)
+                     	LOGD("do nothing");
+                     } else if (ret == ERROR_EXTRACT_FAIL) {
+                         LOGD("image extract fail.");
+-                        acquired_event_notify(FINGERPRINT_ACQUIRED_INSUFFICIENT);
++                        //acquired_event_notify(FINGERPRINT_ACQUIRED_INSUFFICIENT);
+                     } else if (ret == ERROR_ENROLL_DUPLICATE_AREA) {
+                     	duplicate_area_num++;
+                     	if(duplicate_area_num<6) {
+diff --git a/fingerprint/client/libfprint/process/screen_status.c b/fingerprint/client/libfprint/process/screen_status.c
+index ced2c18..ee345c9 100644
+--- a/fingerprint/client/libfprint/process/screen_status.c
++++ b/fingerprint/client/libfprint/process/screen_status.c
+@@ -18,7 +18,7 @@ static void *screen_status_thread(void *p)
+ #if defined(PRODUCT_E2_OVERSEA) && defined(OEM_KONKA)
+     const int default_ck_period = DEFAULT_CK_PERIOD_A80;
+ #elif defined(PRODUCT_DOGE_A63) && defined(OEM_KUSAI)
+-    const int default_ck_period = DEFAULT_CK_PERIOD_A83;
++    const int default_ck_period = 1;
+ #endif
+     int ck_period = property_get_int32(KEY_CK_PERIOD, default_ck_period);
+     while(1) {
+diff --git a/fingerprint/service/protocol/protocol.c b/fingerprint/service/protocol/protocol.c
+index 86053f4..d0dfa68 100644
+--- a/fingerprint/service/protocol/protocol.c
++++ b/fingerprint/service/protocol/protocol.c
+@@ -72,7 +72,7 @@ static void protocol_service_init(protocol_service_init_t *data)
+     image_size = s_sensor->image_size;
+     sensor_create(&g_config);
+     memcpy(&data->response.config, &g_config, sizeof(microarray_properties_t));
+-    LOGD("alg pvm version = %s", pvm_getVersion());
++    //LOGD("alg pvm version = %s", pvm_getVersion());
+ 
+     data->response.err = 0;
+     is_inited = 1;
+diff --git a/fingerprint/service/soft_sensor/sensor64/algorithm/algorithm.h b/fingerprint/service/soft_sensor/sensor64/algorithm/algorithm.h
+index 9753dc5..36ec9ca 100644
+--- a/fingerprint/service/soft_sensor/sensor64/algorithm/algorithm.h
++++ b/fingerprint/service/soft_sensor/sensor64/algorithm/algorithm.h
+@@ -59,13 +59,13 @@ void afs64_ifft2(int *realImg, int *imagImg, int index[]);
+ void afs64_fft2(int *realImg, int *imagImg, int index[]);
+ void afs64_fft1(int *realPart, int *imagPart, int cnt);
+ void afs64_fft(int *baseReal, int *baseImag, int *preReal, int *preImag);
+-int getFirstArea(uint8_t *imgBkg, uint8_t *imgRaw, int *offset, int *centerX, int *centerY, int *difTH);
+-int getNaviResult(int sumH, int sumH1, int sumW, int sumW1, int cntImg);
++int getFirstArea64(uint8_t *imgBkg, uint8_t *imgRaw, int *offset, int *centerX, int *centerY, int *difTH);
++int getNaviResult64(int sumH, int sumH1, int sumW, int sumW1, int cntImg);
+ //end 112 navigate function
+ 
+ int fp64_calc_cor(unsigned char *img1, unsigned char *img2);
+ 
+-int fp64_finger_detect(u8 *imgIn, u8 *imgTmp);
++int fp64_finger_detect(u8 *imgIn);
+ int fp64_finger_press(unsigned char *img1, unsigned char *img2);
+ 
+ int fp64_testWet(uint8_t *imgRaw, uint8_t *imgBkg, int offset);
+diff --git a/fingerprint/service/soft_sensor/sensor64/algorithm/fft.c b/fingerprint/service/soft_sensor/sensor64/algorithm/fft.c
+index 75d24b3..07d7406 100644
+--- a/fingerprint/service/soft_sensor/sensor64/algorithm/fft.c
++++ b/fingerprint/service/soft_sensor/sensor64/algorithm/fft.c
+@@ -170,7 +170,7 @@ static void ifft2(int *realImg, int *imagImg, int *index)
+ }
+ 
+ 
+-void fp96_fft(int *baseReal, int *baseImag, int *preReal, int *preImag)
++void fp64_fft(int *baseReal, int *baseImag, int *preReal, int *preImag)
+ {
+ 	int i;
+ 	int tmpBase1, tmpBase2, tmpPre1, tmpPre2, absTmp;
+@@ -216,7 +216,7 @@ void fp96_fft(int *baseReal, int *baseImag, int *preReal, int *preImag)
+ }
+ 
+ 
+-void fp96_getRmvbkg(uint8_t* imgPre, uint8_t* imgCur, uint8_t* imgBkg, int* preOut, int* curOut)
++void fp64_getRmvbkg(uint8_t* imgPre, uint8_t* imgCur, uint8_t* imgBkg, int* preOut, int* curOut)
+ {
+ 	int i,j;
+ 	uint8_t *pRawPre, *pRawCur, *pBkg;
+diff --git a/fingerprint/service/soft_sensor/sensor64/algorithm/finger_detect.c b/fingerprint/service/soft_sensor/sensor64/algorithm/finger_detect.c
+index 768032d..4dce6da 100644
+--- a/fingerprint/service/soft_sensor/sensor64/algorithm/finger_detect.c
++++ b/fingerprint/service/soft_sensor/sensor64/algorithm/finger_detect.c
+@@ -1,427 +1,228 @@
+ #include <string.h>
+ #include <stdlib.h>
+-#include <math.h>
+-//#include "config.h"
++//#include <math.h>
++#include"algorithm.h"
++#include "config.h"
+ 
+-#define WIDTH 64
+-#define HEIGHT 64
++#define Width 64
++#define Height 64
+ #define TH 60
+-#define GLCM_DIS 4  //灰度共生矩阵的统计距离
++#define GLCM_DIS 3  //灰度共生矩阵的统计距离
+ #define GLCM_CLASS 8 //计算灰度共生矩阵的图像灰度值等级化
+-#define PI 3.141592653
+ typedef unsigned char u8;
+ 
+-static void meanSmooth(u8* imgIn,u8* imgSmooth)
++static void mean_var(u8 *img,double *feat)
+ {
+ 	int i,j;
+-	for(i=0;i<HEIGHT;i++)
+-        for(j=0;j<WIDTH;j++)
++	double mean = 0,var = 0;
++	int count = 0,count2 = 0;
++	for(i = 1;i < Height-1;i++)
++	{
++        for(j = 1;j < Width-1;j++)
+ 		{
+-			if( i < HEIGHT-1 && i > 0 && j < WIDTH-1 && j > 0)
+-				imgSmooth[i*WIDTH+j] = (4*imgIn[i*WIDTH+j] + 2*imgIn[(i-1)*WIDTH+j] + 2*imgIn[(i+1)*WIDTH+j] + 2*imgIn[i*WIDTH+j-1] + 2*imgIn[i*WIDTH+j+1]
+-			+ imgIn[(i-1)*WIDTH+j-1] + imgIn[(i-1)*WIDTH+j+1] + imgIn[(i+1)*WIDTH+j-1] + imgIn[(i+1)*WIDTH+j+1])/16;
+-			else
+-				imgSmooth[i*WIDTH+j] = imgIn[i*WIDTH+j];
++			if(img[i*Width+j] > TH)
++			{
++				mean += img[i*Width+j];
++				count ++;
++			}
+ 		}
+-}
++	}
++	mean /= count;
++	for(i = 1;i < Height-1;i++)
++	{
++        for(j = 1;j < Width-1;j++)
++		{
++			if(img[i*Width+j] > TH)
++			{
++				var += abs(img[i*Width+j]-mean);
++			}
++		}
++	}
+ 
+-//计算覆盖率
+-//输入：去背景后的图像
+-//return：覆盖率 0-100
+-static double press_percent(u8* imgSrc,u8* imgDst)
+-{
+-	 int i,j,k,m,value;
+-	 int count=0;
+-	 for(i=0;i<HEIGHT;i++)
+-        for(j=0;j<WIDTH;j++)
+-			if(imgSrc[i*WIDTH+j]>80)
+-				imgDst[i*WIDTH+j] = 255;
+-			else
+-				imgDst[i*WIDTH+j] = 0;
+-
+-	 for(i=2;i<HEIGHT-2;i++)
+-         for(j=2;j<WIDTH-2;j++)
+-	     {
+-		     if(imgDst[i*WIDTH+j] == 0)
+-		     {
+-	              value = 0;
+-			      unsigned char flag[8] = {0,0,0,0,0,0,0,0};
+-
+-			      for(m=1;m<=10;m++)
+-			      {
+-			  	      flag[0] = flag[0] || imgDst[(i-m)*WIDTH+j-m] == 255 ;
+-				      if( flag[0] ==1 || i-m < 2 || j-m < 2)
+-					      break;
+-			      }
+-			      for(m=1;m<=10;m++)
+-			      {
+-				      flag[1] = flag[1] || imgDst[(i+m)*WIDTH+j-m] == 255 ;
+-				      if( flag[1] ==1 || i+m > HEIGHT-2 || j-m < 2)
+-					      break;
+-			      }
+-			      for(m=1;m<=10;m++)
+-			      {
+-				      flag[2] = flag[2] || imgDst[(i-m)*WIDTH+j+m] == 255 ;
+-				      if( flag[2] ==1 || j+m > WIDTH-2 || i-m < 2)
+-					      break;
+-			      }
+-			      for(m=1;m<=10;m++)
+-			      {
+-				      flag[3] = flag[3] || imgDst[(i+m)*WIDTH+j+m] == 255 ;
+-				      if( flag[3] ==1 || i+m > HEIGHT-2 || j+m > WIDTH-2)
+-					      break;
+-			      }
+-			      //节省时间，前4个都是0，进入下一个循环
+-			      value = flag[0] + flag[1] + flag[2] + flag[3];
+-			      if(value < 1 )
+-				      continue;
+-
+-			      for(m=1;m<=10;m++)
+-			      {
+-				      flag[4] = flag[4] || imgDst[(i)*WIDTH+j-m] == 255 ;
+-				      if( flag[4] ==1 || j-m < 2)
+-					      break;
+-			      }
+-			      //节省时间，前5个有4个0，进入下一个循环
+-			      value = value + flag[4];
+-			      if(value < 2)
+-				      continue;
+-
+-			      for(m=1;m<=10;m++)
+-			      {
+-				      flag[5] = flag[5] || imgDst[(i)*WIDTH+j+m] == 255 ;
+-				      if( flag[5] ==1 || j+m > WIDTH-2)
+-					      break;
+-			      }
+-			      //节省时间，前6个有4个0，进入下一个循环
+-			      value = value + flag[5];
+-			      if(value < 3)
+-				      continue;
+-
+-			      for(m=1;m<=10;m++)
+-			      {
+-				      flag[6] = flag[6] || imgDst[(i-m)*WIDTH+j] == 255 ;
+-				      if( flag[6] ==1 || i-m < 2)
+-					      break;
+-			      }
+-			      //节省时间，前7个有4个0，进入下一个循环
+-			      value = value + flag[6];
+-			      if(value < 4)
+-				      continue;
+-
+-			      for(m=1;m<=10;m++)
+-			      {
+-				      flag[7] = flag[7] || imgDst[(i+m)*WIDTH+j] == 255 ;
+-				      if( flag[7] ==1 || i+m > HEIGHT-2)
+-					      break;
+-			      }
+-
+-			      value = value + flag[7];
+-			      if( value > 4)
+-			      {
+-				      imgDst[i*WIDTH+j] = 255;
+-					  count++;
+-			      }
+-		      }
+-			 else
+-				 count++;
+-	      }
+-
+-	 return (double) count * 100 / (WIDTH - 4) / (HEIGHT - 4);
++	var /= count;
++	feat[2] = mean;
++	feat[3] = var;
+ }
+ 
+-static void clahe(u8* imgSrc,u8 *imgRate,u8* imgDst)
++//图像增强
++static void clahe(u8* parry,u8* parry1)
+ {
+ 	int i, j, k, a;
+ 	int sum = 1;
+-	int grayCount[256] = {0};
+-	int graySmooth[256] = {0};
++	int grayCount[256];
+ 	float s[256];
+ 	float s2[256];
+-	int grayValue,count_max= 0,flag,min=255,max=0;
+-
++	int grayValue;
+ 	for (a = 0; a < 256; a++)
+ 		grayCount[a] = 0;
+-	for (i = 2; i < HEIGHT - 2; i++)
+-		for (j = 2; j < WIDTH - 2; j++) {
+-			grayValue = imgSrc[i * WIDTH + j];
+-			if (imgRate[i*WIDTH+j] > 0) {
++	for (i = 2; i < Height - 2; i++)
++		for (j = 2; j < Width - 2; j++) {
++			grayValue = parry[i * Width + j];
++			if (grayValue > 50) {
+ 				grayCount[grayValue]++;
+ 				sum++;
+ 			}
+ 		}
+-	for(i=10;i<250;i++)
+-	{
+-		graySmooth[i] = (grayCount[i] + grayCount[i-1] + grayCount[i+1])/3;
+-	}
+-	s[0] = 0;
++	s[0] = (float) grayCount[0] / (float) sum;
+ 	//灰度转换
+ 	for (k = 1; k < 256; k++) {
+-		s[k] = s[k - 1] + (float) graySmooth[k] / (float) sum;
++		s[k] = s[k - 1] + (float) grayCount[k] / (float) sum;
+ 	}
+ 	for (i = 0; i < 256; i++) {
+ 		s2[i] = (int) (255 * s[i] + 0.5);
+ 	}
+ 	//写入图像
+-	for (i = 0; i < HEIGHT; i++)
+-		for (j = 0; j < WIDTH; j++) {
+-			if(imgRate[i*WIDTH+j] > 0){
+-			    grayValue = imgSrc[i * WIDTH + j];
+-			    imgDst[i * WIDTH + j] = (u8) s2[grayValue];
+-			}
+-			else
+-				imgDst[i * WIDTH + j] = 0;
++	for (i = 0; i < Height; i++)
++		for (j = 0; j < Width; j++) {
++			int value = parry[i * Width + j];
++			//if(value>50)
++			parry1[i * Width + j] = (u8) s2[value];
++			//else
++			//    parry1[i*Width+j] = 0;
+ 		}
+ }
+ 
+-//计算梯度
+-static void gradxy(u8* imgSrc,u8 *imgRate,int th,double* feat)
++static double* CreatGauss(double sigma, int *pnWidowSize)
+ {
+-	int i,j;
+-	int num = 1;
+-	int num1=1,num2=1,num3=1,num4=1;
+-	double gradx = 0,grady = 0,grad;
+-	double sum1=0,sum2=0,sum3=0,sum4=0;
+-	double sum = 0;
+-	double max,min;
+-
+-	for(i = 2;i < HEIGHT-2;i++)
+-        for(j = 2;j < WIDTH-2;j++) {
+-			if(imgSrc[i*WIDTH+j] > th && imgRate[i*WIDTH+j] > 0 && imgRate[(i-1)*WIDTH+j] > 0 && imgRate[(i+1)*WIDTH+j] > 0
+-				&& imgRate[i*WIDTH+j-1] > 0 && imgRate[i*WIDTH+j+1] > 0) {
+-			    num ++;
+-				gradx = abs(imgSrc[(i+1)*WIDTH+j] - imgSrc[(i-1)*WIDTH+j] + imgSrc[(i+1)*WIDTH+j+1]
+-				            - imgSrc[(i-1)*WIDTH+j+1] + imgSrc[(i+1)*WIDTH+j-1] - imgSrc[(i-1)*WIDTH+j-1]);
+-				grady = abs(imgSrc[(i+1)*WIDTH+j+1] - imgSrc[(i+1)*WIDTH+j-1] + imgSrc[(i-1)*WIDTH+j+1]
+-				            - imgSrc[(i-1)*WIDTH+j-1] + imgSrc[i*WIDTH+j+1] - imgSrc[i*WIDTH+j-1]);
+-				grad = sqrt((double)(gradx*gradx+grady*grady));
+-
+-				if(grad>180) sum ++;
+-				if(i >= 2 && i < HEIGHT/2-2 && j >= 2 && j < WIDTH/2-2)
+-				{
+-					num1++;
+-					if(grad>180) sum1 ++;
+-				}
+-				if(i >= 2 && i < HEIGHT/2-2 && j >= WIDTH/2-2 && j < WIDTH-2)
+-				{
+-					num2++;
+-					if(grad>180) sum2 ++;
+-				}
+-				if(i >= HEIGHT/2+2 && i < HEIGHT-2 && j >= 2 && j < WIDTH/2-2)
+-				{
+-					num3++;
+-					if(grad>180) sum3 ++;
+-				}
+-				if(i >= HEIGHT/2+2 && i < HEIGHT-2 && j >= WIDTH/2-2 && j < WIDTH-2)
+-				{
+-					num4++;
+-					if(grad>180) sum4 ++;
+-				}
+-			}
+-		}
+-    sum = sum*100/num;
+-	if(num1>0) sum1 = sum1*100/num1;
+-	else sum1=0;
+-	if(num2>0) sum2 = sum2*100/num2;
+-	else sum2=0;
+-	if(num3>0) sum3 = sum3*100/num3;
+-	else sum3=0;
+-	if(num4>0) sum4 = sum4*100/num4;
+-	else sum4=0;
++	long i;
++	int nCenter; //数组中心点
++	double dDis; //数组中一点到中心点距离
++	double dValue; //中间变量
++	double dSum;
++
++	dSum = 0;
++	// [-3*sigma,3*sigma] 以内数据，会覆盖绝大部分滤波系数
++	*pnWidowSize = 1 + 2 * ceil(3 * sigma);
++	nCenter = (*pnWidowSize) / 2;
++	double *pdKernel = (double*) malloc(*pnWidowSize * sizeof(double));
++
++	//生成高斯数据
++	for (i = 0; i < (*pnWidowSize); i++) {
++		dDis = i - nCenter;
++		dValue = exp(-(1 / 2) * dDis * dDis / (sigma * sigma))
++				/ (sqrt(2 * 3.1415926) * sigma);
++		pdKernel[i] = dValue;
++		dSum += dValue;
++	}
++	//归一化
++	for (i = 0; i < (*pnWidowSize); i++) pdKernel[i] /= dSum;
+ 
+-	max=sum1;
+-	if(max<sum2) max = sum2;
+-	if(max<sum3) max = sum3;
+-	if(max<sum4) max = sum4;
+-	min=sum1;
+-	if(min>sum2) min = sum2;
+-	if(min>sum3) min = sum3;
+-	if(min>sum4) min = sum4;
+-	//printf(" var = %f ",max-min);
+-	feat[0] = sum;
+-	feat[1] = max-min;
++    return pdKernel;
+ }
+ 
+-/* 计算线性度
+- * @return 成功 >0, 失败  -1
+- */
+-static double xianxingdu(u8* imgSrc,u8* imgRate)
++//用高斯滤波器平滑原图像
++static void GaussianSmooth(u8* pGray, u8* pResult, double sigma)
+ {
+-	int i,j,l,k;
+-	double gradx,grady;
+-	float* sita = (float*)malloc(WIDTH*HEIGHT*sizeof(float));
+-	int PDd1[GLCM_CLASS*GLCM_CLASS] = {0};
+-	int PDd2[GLCM_CLASS*GLCM_CLASS] = {0};
+-	int PDd3[GLCM_CLASS*GLCM_CLASS] = {0};
+-	int PDd4[GLCM_CLASS*GLCM_CLASS] = {0};
+-	int PDd5[GLCM_CLASS*GLCM_CLASS] = {0};
+-	int PDd6[GLCM_CLASS*GLCM_CLASS] = {0};
+-	int PDd7[GLCM_CLASS*GLCM_CLASS] = {0};
+-	int PDd8[GLCM_CLASS*GLCM_CLASS] = {0};
+-
+-	double f[8] = {0,0,0,0,0,0,0,0};
+-	double g[8] = {0,0,0,0,0,0,0,0};
+-	double tempM[8];
+-	double fea1,fea2;
+-
+-	if(sita == NULL) return -1;
+-	for(i = 0;i < HEIGHT;i++)
+-		for(j = 0;j < WIDTH;j++)
+-		{
+-			sita[i*WIDTH+j] = 0;
+-		}
+-
+-	for(i = 1;i < HEIGHT-1;i++)
+-        for(j = 1;j < WIDTH-1;j++)
+-		{
+-			if(imgRate[i*WIDTH+j] > 0)
+-			{
+-				gradx = imgSrc[i*WIDTH+j-1] - imgSrc[i*WIDTH+j+1] //+ img1[(i-2)*WIDTH+j+1] - img1[(i-2)*WIDTH+j-1]// + img1[(i-3)*WIDTH+j+1] - img1[(i-3)*WIDTH+j-1]
+-				+ imgSrc[(i-1)*WIDTH+j-1] - imgSrc[(i-1)*WIDTH+j+1] //+ img1[(i+2)*WIDTH+j+1] - img1[(i+2)*WIDTH+j-1]// + img1[(i+3)*WIDTH+j+1] - img1[(i+3)*WIDTH+j-1]
+-				+ imgSrc[(i+1)*WIDTH+j-1] - imgSrc[(i+1)*WIDTH+j+1];
+-
+-				grady = imgSrc[(i+1)*WIDTH+j] - imgSrc[(i-1)*WIDTH+j] //+ img1[(i+1)*WIDTH+j-2] - img1[(i-1)*WIDTH+j-2]// + img1[(i+1)*WIDTH+j-3] - img1[(i-1)*WIDTH+j-3]
+-				+ imgSrc[(i+1)*WIDTH+j-1] - imgSrc[(i-1)*WIDTH+j-1] //+ img1[(i+1)*WIDTH+j+2] - img1[(i-1)*WIDTH+j+2]// + img1[(i+1)*WIDTH+j+3] - img1[(i-1)*WIDTH+j+3]
+-				+ imgSrc[(i+1)*WIDTH+j+1] - imgSrc[(i-1)*WIDTH+j+1];
+-
+-				sita[i*WIDTH+j] = atan((float)grady/gradx) + PI/2;
+-				//printf("  %f  ",sita[i*WIDTH+j]);
++    long x, y;
++	long i;
++	int nWindowSize; //高斯滤波器长度
++	int nLen; //窗口长度
++	double dDotMul;   //高斯系数与图像数据的点乘
++	double dWeightSum; //产生一维高斯数据
++	double *pdKernel; //一维高斯滤波器
++
++    //滤波系数总和
++    double *pdTemp = (double*)malloc(Width*Height*sizeof(double));
++
++    //产生一维高斯数据
++    //CreatGauss(sigma, &pdKernel, &nWindowSize);
++    pdKernel = CreatGauss(sigma, &nWindowSize);
++
++    nLen = nWindowSize/2;
++    //x方向滤波
++	for (y = 0; y < Height; y++) {
++		for (x = 0; x < Width; x++) {
++			dDotMul = 0;
++			dWeightSum = 0;
++			for (i = (-nLen); i <= nLen; i++) {
++				//判断是否在图像内部
++				if ((i + x) >= 0 && (i + x) < Width) {
++					dDotMul += (double) pGray[y * Width + (i + x)] * pdKernel[nLen + i];
++					dWeightSum += pdKernel[nLen + i];
++				}
+ 			}
++			pdTemp[y * Width + x] = dDotMul / dWeightSum;
+ 		}
+-	for(i=GLCM_DIS+2;i<HEIGHT-GLCM_DIS-2;i++)
+-		for(j=GLCM_DIS+2;j<WIDTH-GLCM_DIS-2;j++)
+-			if(imgRate[i*WIDTH+j] > 0 && imgSrc[i*WIDTH+j] > TH)
+-			{
+-			    for(l=0;l<GLCM_CLASS;l++)
+-				    for(k=0;k<GLCM_CLASS;k++)
+-				    {
+-
+-					    if( imgSrc[(i+GLCM_DIS)*WIDTH+j] > TH && (sita[i*WIDTH+j] >=((l-1)*PI/GLCM_CLASS) && sita[i*WIDTH+j] < ((2*(l-1)+1)*PI/2/GLCM_CLASS) )
+-						    && (sita[(i+GLCM_DIS)*WIDTH+j] >= ((k-1)*PI/GLCM_CLASS) && sita[(i+GLCM_DIS)*WIDTH+j] < (2*(k-1)+1)*PI/2/GLCM_CLASS) )
+-						    PDd1[l*GLCM_CLASS+k] ++ ;
+-
+-					    if( imgSrc[(i-GLCM_DIS)*WIDTH+j] > TH && (sita[i*WIDTH+j] >=((l-1)*PI/GLCM_CLASS) && sita[i*WIDTH+j] < ((2*(l-1)+1)*PI/2/GLCM_CLASS) )
+-						    && (sita[(i-GLCM_DIS)*WIDTH+j] >= ((k-1)*PI/GLCM_CLASS) && sita[(i-GLCM_DIS)*WIDTH+j] < (2*(k-1)+1)*PI/2/GLCM_CLASS) )
+-						    PDd2[l*GLCM_CLASS+k] ++ ;
+-
+-					    if( imgSrc[i*WIDTH+j+GLCM_DIS] > TH && (sita[i*WIDTH+j] >=((l-1)*PI/GLCM_CLASS) && sita[i*WIDTH+j] < ((2*(l-1)+1)*PI/2/GLCM_CLASS) )
+-						    && (sita[i*WIDTH+j+GLCM_DIS] >= ((k-1)*PI/GLCM_CLASS) && sita[i*WIDTH+j+GLCM_DIS] < (2*(k-1)+1)*PI/2/GLCM_CLASS) )
+-					   	    PDd3[l*GLCM_CLASS+k] ++ ;
+-
+-					    if( imgSrc[i*WIDTH+j-GLCM_DIS] > TH &&  (sita[i*WIDTH+j] >=((l-1)*PI/GLCM_CLASS) && sita[i*WIDTH+j] < ((2*(l-1)+1)*PI/2/GLCM_CLASS) )
+-						    && (sita[i*WIDTH+j-GLCM_DIS] >= ((k-1)*PI/GLCM_CLASS) && sita[i*WIDTH+j-GLCM_DIS] < (2*(k-1)+1)*PI/2/GLCM_CLASS) )
+-						    PDd4[l*GLCM_CLASS+k] ++ ;
+-
+-					    if( imgSrc[(i+GLCM_DIS)*WIDTH+j+GLCM_DIS] > TH &&  (sita[i*WIDTH+j] >=((l-1)*PI/GLCM_CLASS) && sita[i*WIDTH+j] < ((2*(l-1)+1)*PI/2/GLCM_CLASS) )
+-						    && (sita[(i+GLCM_DIS)*WIDTH+j+GLCM_DIS] >= ((k-1)*PI/GLCM_CLASS) && sita[(i+GLCM_DIS)*WIDTH+j+GLCM_DIS] < (2*(k-1)+1)*PI/2/GLCM_CLASS) )
+-						    PDd5[l*GLCM_CLASS+k] ++ ;
+-
+-					    if( imgSrc[(i-GLCM_DIS)*WIDTH+j+GLCM_DIS] > TH &&  (sita[i*WIDTH+j] >=((l-1)*PI/GLCM_CLASS) && sita[i*WIDTH+j] < ((2*(l-1)+1)*PI/2/GLCM_CLASS) )
+-						    && (sita[(i-GLCM_DIS)*WIDTH+j+GLCM_DIS] >= ((k-1)*PI/GLCM_CLASS) && sita[(i-GLCM_DIS)*WIDTH+j+GLCM_DIS] < (2*(k-1)+1)*PI/2/GLCM_CLASS) )
+-						    PDd6[l*GLCM_CLASS+k] ++ ;
+-
+-					    if( imgSrc[(i+GLCM_DIS)*WIDTH+j-GLCM_DIS] > TH &&  (sita[i*WIDTH+j] >=((l-1)*PI/GLCM_CLASS) && sita[i*WIDTH+j] < ((2*(l-1)+1)*PI/2/GLCM_CLASS) )
+-						    && (sita[(i+GLCM_DIS)*WIDTH+j-GLCM_DIS] >= ((k-1)*PI/GLCM_CLASS) && sita[(i+GLCM_DIS)*WIDTH+j-GLCM_DIS] < (2*(k-1)+1)*PI/2/GLCM_CLASS) )
+-						    PDd7[l*GLCM_CLASS+k] ++ ;
+-
+-					    if( imgSrc[(i-GLCM_DIS)*WIDTH+j-GLCM_DIS] > TH &&  (sita[i*WIDTH+j] >=((l-1)*PI/GLCM_CLASS) && sita[i*WIDTH+j] < ((2*(l-1)+1)*PI/2/GLCM_CLASS) )
+-						    && (sita[(i-GLCM_DIS)*WIDTH+j-GLCM_DIS] >= ((k-1)*PI/GLCM_CLASS) && sita[(i-GLCM_DIS)*WIDTH+j-GLCM_DIS] < (2*(k-1)+1)*PI/2/GLCM_CLASS) )
+-						    PDd8[l*GLCM_CLASS+k] ++ ;
+-					}
+-				}
+-	 for(i = 0;i < GLCM_CLASS;i++)
+-         for (j = 0;j < GLCM_CLASS;j++)
+-		 {
+-			 f[0] += (double)PDd1[i*GLCM_CLASS+j]*cos((i-j)*2*PI/GLCM_CLASS);
+-			 g[0] += PDd1[i*GLCM_CLASS+j];
+-
+-			 f[1] += (double)PDd2[i*GLCM_CLASS+j]*cos((i-j)*2*PI/GLCM_CLASS);
+-			 g[1] += PDd2[i*GLCM_CLASS+j];
+-
+-			 f[2] += (double)PDd3[i*GLCM_CLASS+j]*cos((i-j)*2*PI/GLCM_CLASS);
+-			 g[2] += PDd3[i*GLCM_CLASS+j];
+-
+-			 f[3] += (double)PDd4[i*GLCM_CLASS+j]*cos((i-j)*2*PI/GLCM_CLASS);
+-			 g[3] += PDd4[i*GLCM_CLASS+j];
+-
+-			 f[4] += (double)PDd5[i*GLCM_CLASS+j]*cos((i-j)*2*PI/GLCM_CLASS);
+-			 g[4] += PDd5[i*GLCM_CLASS+j];
+-
+-			 f[5] += (double)PDd6[i*GLCM_CLASS+j]*cos((i-j)*2*PI/GLCM_CLASS);
+-			 g[5] += PDd6[i*GLCM_CLASS+j];
+-
+-			 f[6] += (double)PDd7[i*GLCM_CLASS+j]*cos((i-j)*2*PI/GLCM_CLASS);
+-			 g[6] += PDd7[i*GLCM_CLASS+j];
+-
+-			 f[7] += (double)PDd8[i*GLCM_CLASS+j]*cos((i-j)*2*PI/GLCM_CLASS);
+-			 g[7] += PDd8[i*GLCM_CLASS+j];
+-		 }
++	}
+ 
+-	tempM[0] = f[0]/g[0];
+-	fea1 = tempM[0];
+-	for(i=1;i<8;i++)
+-	{
+-		tempM[i] = (double)f[i]/g[i];
+-		fea1 += tempM[i];
++    //y方向滤波
++    for(x=0; x<Width;x++)  {
++       for(y=0; y<Height; y++)
++	   {
++          dDotMul = 0;
++		  dWeightSum = 0;
++              for(i=(-nLen);i<=nLen;i++)
++			  {
++                  if((i+y)>=0 && (i+y)< Height)
++				  {
++                      dDotMul += (double)pdTemp[(y+i)*Width+x]*pdKernel[nLen+i];
++					  dWeightSum += pdKernel[nLen+i];
++				  }
++			  }
++          pResult[y*Width+x] = (unsigned char)dDotMul/dWeightSum;
++	   }
+ 	}
+-	fea1 /= 8;
+-	if(sita != NULL)
+-	    free(sita);
+ 
+-	return fea1;
++    free(pdKernel);
++    free(pdTemp);
++	pdKernel = NULL;
++	pdTemp = NULL;
+ }
+ 
+-static double oritation(u8* img1,u8* imgRate,double per,u8* ori)
++//计算方向
++static void oritation(u8*img1,double per,double *feat)
+ {
+-	int i,j,x,y;
++	int i,j;
+ 	double gradx = 0,grady = 0,grad;
+-	int D1,D2,D3,D4,D5,D6,D7,D8,V1,V2,V3,V4,max1,max2,count=0,count1=0,temp;
++	int D1,D2,D3,D4,D5,D6,D7,D8,V1,V2,V3,V4,max1,max2,count=0,count1=0;
++	u8* ori = (u8*)malloc(Width*Height*sizeof(u8));
+ 	unsigned int oricount[9] = {0,0,0,0,0,0,0,0};
+ 	unsigned int sum[8] = {0,0,0,0,0,0,0,0};
+-	double var_ori = 0;
++	int var_ori = 0;
+ 
+-	for(i = 0;i < HEIGHT;i++)
+-		for(j = 0;j < WIDTH;j++)
++	for(i = 0;i < Height;i++)
++		for(j = 0;j < Width;j++)
+ 		{
+-			ori[i*WIDTH+j] = 0;
++			ori[i*Width+j] = 0;
+ 		}
+ 
+-	for(i = 5;i < HEIGHT-5;i++)
+-        for(j = 5;j < WIDTH-5;j++)
++	for(i = 5;i < Height-5;i++)
++        for(j = 5;j < Width-5;j++)
+ 		{
+-			if(imgRate[i*WIDTH+j] > 0)
++			if(img1[i*Width+j] > 60)
+ 			{
+-				D1 = abs(img1[i*WIDTH+j+3]-img1[i*WIDTH+j]) + abs(img1[i*WIDTH+j+2]-img1[i*WIDTH+j])
+-					+ abs(img1[i*WIDTH+j+1]-img1[i*WIDTH+j]) + abs(img1[i*WIDTH+j-1]-img1[i*WIDTH+j])
+-					+ abs(img1[i*WIDTH+j-2]-img1[i*WIDTH+j]) + abs(img1[i*WIDTH+j-3]-img1[i*WIDTH+j]) ;
+-
+-				D2 = abs(img1[(i+2)*WIDTH+j-3]-img1[i*WIDTH+j]) + abs(img1[(i+1)*WIDTH+j-3]-img1[i*WIDTH+j])
+-					+ abs(img1[(i+1)*WIDTH+j-2]-img1[i*WIDTH+j]) + abs(img1[(i-1)*WIDTH+j+2]-img1[i*WIDTH+j])
+-					+ abs(img1[(i-1)*WIDTH+j+3]-img1[i*WIDTH+j]) + abs(img1[(i-2)*WIDTH+j+3]-img1[i*WIDTH+j]) ;
+-
+-				D3 = abs(img1[(i+3)*WIDTH+j-3]-img1[i*WIDTH+j]) + abs(img1[(i+2)*WIDTH+j-2]-img1[i*WIDTH+j])
+-					+ abs(img1[(i+1)*WIDTH+j-1]-img1[i*WIDTH+j]) + abs(img1[(i-1)*WIDTH+j+1]-img1[i*WIDTH+j])
+-					+ abs(img1[(i-2)*WIDTH+j+2]-img1[i*WIDTH+j]) + abs(img1[(i-3)*WIDTH+j+3]-img1[i*WIDTH+j]) ;
+-
+-                D4 = abs(img1[(i+3)*WIDTH+j-2]-img1[i*WIDTH+j]) + abs(img1[(i+3)*WIDTH+j-1]-img1[i*WIDTH+j])
+-					+ abs(img1[(i+2)*WIDTH+j-1]-img1[i*WIDTH+j]) + abs(img1[(i-2)*WIDTH+j+1]-img1[i*WIDTH+j])
+-					+ abs(img1[(i-3)*WIDTH+j+1]-img1[i*WIDTH+j]) + abs(img1[(i-3)*WIDTH+j+2]-img1[i*WIDTH+j]) ;
+-
+-                D5 = abs(img1[(i+3)*WIDTH+j]-img1[i*WIDTH+j]) + abs(img1[(i+2)*WIDTH+j]-img1[i*WIDTH+j])
+-					+ abs(img1[(i+1)*WIDTH+j]-img1[i*WIDTH+j]) + abs(img1[(i-1)*WIDTH+j]-img1[i*WIDTH+j])
+-					+ abs(img1[(i-2)*WIDTH+j]-img1[i*WIDTH+j]) + abs(img1[(i-3)*WIDTH+j]-img1[i*WIDTH+j]);
+-
+-                D6 = abs(img1[(i+3)*WIDTH+j+2]-img1[i*WIDTH+j]) + abs(img1[(i+3)*WIDTH+j+1]-img1[i*WIDTH+j])
+-					+ abs(img1[(i+2)*WIDTH+j+1]-img1[i*WIDTH+j]) + abs(img1[(i-2)*WIDTH+j-1]-img1[i*WIDTH+j])
+-					+ abs(img1[(i-3)*WIDTH+j-1]-img1[i*WIDTH+j]) + abs(img1[(i-3)*WIDTH+j-2]-img1[i*WIDTH+j]) ;
+-
+-                D7 = abs(img1[(i+3)*WIDTH+j+3]-img1[i*WIDTH+j]) + abs(img1[(i+2)*WIDTH+j+2]-img1[i*WIDTH+j])
+-					+ abs(img1[(i+1)*WIDTH+j+1]-img1[i*WIDTH+j]) + abs(img1[(i-1)*WIDTH+j-1]-img1[i*WIDTH+j])
+-					+ abs(img1[(i-2)*WIDTH+j-2]-img1[i*WIDTH+j]) + abs(img1[(i-3)*WIDTH+j-3]-img1[i*WIDTH+j]) ;
+-
+-                D8 = abs(img1[(i+2)*WIDTH+j+3]-img1[i*WIDTH+j]) + abs(img1[(i+1)*WIDTH+j+3]-img1[i*WIDTH+j])
+-					+ abs(img1[(i+1)*WIDTH+j+2]-img1[i*WIDTH+j]) + abs(img1[(i-1)*WIDTH+j-2]-img1[i*WIDTH+j])
+-					+ abs(img1[(i-1)*WIDTH+j-3]-img1[i*WIDTH+j]) + abs(img1[(i-2)*WIDTH+j-3]-img1[i*WIDTH+j]) ;
++				D1 = abs(img1[i*Width+j+4]-img1[i*Width+j]) + abs(img1[i*Width+j+3]-img1[i*Width+j])
++					+ abs(img1[i*Width+j+2]-img1[i*Width+j]) + abs(img1[i*Width+j+1]-img1[i*Width+j])
++				    + abs(img1[i*Width+j-1]-img1[i*Width+j]) + abs(img1[i*Width+j-2]-img1[i*Width+j])
++					+ abs(img1[i*Width+j-3]-img1[i*Width+j]) + abs(img1[i*Width+j-4]-img1[i*Width+j]) ;
++				D2 = abs(img1[(i+2)*Width+j-4]-img1[i*Width+j]) + abs(img1[(i+2)*Width+j-3]-img1[i*Width+j])
++				    + abs(img1[(i+1)*Width+j-3]-img1[i*Width+j]) + abs(img1[(i+1)*Width+j-2]-img1[i*Width+j])
++				    + abs(img1[(i-1)*Width+j+2]-img1[i*Width+j]) + abs(img1[(i-1)*Width+j+3]-img1[i*Width+j])
++					+ abs(img1[(i-2)*Width+j+3]-img1[i*Width+j]) + abs(img1[(i-2)*Width+j+4]-img1[i*Width+j]);
++				D3 = abs(img1[(i+4)*Width+j-4]-img1[i*Width+j]) + abs(img1[(i+3)*Width+j-3]-img1[i*Width+j])
++				    + abs(img1[(i+2)*Width+j-2]-img1[i*Width+j]) + abs(img1[(i+1)*Width+j-1]-img1[i*Width+j])
++				    + abs(img1[(i-1)*Width+j+1]-img1[i*Width+j]) + abs(img1[(i-2)*Width+j+2]-img1[i*Width+j])
++					+ abs(img1[(i-3)*Width+j+3]-img1[i*Width+j]) + abs(img1[(i-4)*Width+j+4]-img1[i*Width+j]);
++                D4 = abs(img1[(i+4)*Width+j-2]-img1[i*Width+j]) + abs(img1[(i+3)*Width+j-2]-img1[i*Width+j])
++				    + abs(img1[(i+3)*Width+j-1]-img1[i*Width+j]) + abs(img1[(i+2)*Width+j-1]-img1[i*Width+j])
++				    + abs(img1[(i-2)*Width+j+1]-img1[i*Width+j]) + abs(img1[(i-3)*Width+j+1]-img1[i*Width+j])
++					+ abs(img1[(i-3)*Width+j+2]-img1[i*Width+j]) + abs(img1[(i-4)*Width+j+2]-img1[i*Width+j]);
++                D5 = abs(img1[(i+4)*Width+j]-img1[i*Width+j]) + abs(img1[(i+3)*Width+j]-img1[i*Width+j])
++				    + abs(img1[(i+2)*Width+j]-img1[i*Width+j]) + abs(img1[(i+1)*Width+j]-img1[i*Width+j])
++				    + abs(img1[(i-1)*Width+j]-img1[i*Width+j]) + abs(img1[(i-2)*Width+j]-img1[i*Width+j])
++					+ abs(img1[(i-3)*Width+j]-img1[i*Width+j]) + abs(img1[(i-4)*Width+j]-img1[i*Width+j]);
++                D6 = abs(img1[(i+4)*Width+j+2]-img1[i*Width+j]) + abs(img1[(i+3)*Width+j+2]-img1[i*Width+j])
++				    + abs(img1[(i+3)*Width+j+1]-img1[i*Width+j]) + abs(img1[(i+2)*Width+j+1]-img1[i*Width+j])
++				    + abs(img1[(i-2)*Width+j-1]-img1[i*Width+j]) + abs(img1[(i-3)*Width+j-1]-img1[i*Width+j])
++					+ abs(img1[(i-3)*Width+j-2]-img1[i*Width+j]) + abs(img1[(i-4)*Width+j-2]-img1[i*Width+j]);
++                D7 = abs(img1[(i+4)*Width+j+4]-img1[i*Width+j]) + abs(img1[(i+3)*Width+j+3]-img1[i*Width+j])
++				    + abs(img1[(i+2)*Width+j+2]-img1[i*Width+j]) + abs(img1[(i+1)*Width+j+1]-img1[i*Width+j])
++				    + abs(img1[(i-1)*Width+j-1]-img1[i*Width+j]) + abs(img1[(i-2)*Width+j-2]-img1[i*Width+j])
++					+ abs(img1[(i-3)*Width+j-3]-img1[i*Width+j]) + abs(img1[(i-4)*Width+j-4]-img1[i*Width+j]);
++                D8 = abs(img1[(i+2)*Width+j+4]-img1[i*Width+j]) + abs(img1[(i+2)*Width+j+3]-img1[i*Width+j])
++				    + abs(img1[(i+1)*Width+j+3]-img1[i*Width+j]) + abs(img1[(i+1)*Width+j+2]-img1[i*Width+j])
++				    + abs(img1[(i-1)*Width+j-2]-img1[i*Width+j]) + abs(img1[(i-1)*Width+j-3]-img1[i*Width+j])
++					+ abs(img1[(i-2)*Width+j-3]-img1[i*Width+j]) + abs(img1[(i-2)*Width+j-4]-img1[i*Width+j]);
+ 
+                 V1 = abs(D1-D5);
+ 				V2 = abs(D2-D6);
+@@ -430,146 +231,227 @@ static double oritation(u8* img1,u8* imgRate,double per,u8* ori)
+ 
+ 				max1 = V1;
+ 				if (D1 > D5) {
+-					ori[i * WIDTH + j] = 5;
++					ori[i * Width + j] = 5;
+ 				} else {
+-					ori[i * WIDTH + j] = 1;
++					ori[i * Width + j] = 1;
+ 				}
+ 				if (max1 < V2) {
+ 					max1 = V2;
+ 					if (D2 > D6) {
+-						ori[i * WIDTH + j] = 6;
++						ori[i * Width + j] = 6;
+ 					} else {
+-						ori[i * WIDTH + j] = 2;
++						ori[i * Width + j] = 2;
+ 					}
+ 				}
+ 				if (max1 < V3) {
+ 					max1 = V3;
+ 					if (D3 > D7) {
+-						ori[i * WIDTH + j] = 7;
++						ori[i * Width + j] = 7;
+ 					} else {
+-						ori[i * WIDTH + j] = 3;
++						ori[i * Width + j] = 3;
+ 					}
+ 				}
+ 				if (max1 < V4) {
+ 					max1 = V4;
+ 					if (D4 > D8) {
+-						ori[i * WIDTH + j] = 8;
++						ori[i * Width + j] = 8;
+ 					} else {
+-						ori[i * WIDTH + j] = 4;
++						ori[i * Width + j] = 4;
+ 					}
+ 				}
+ 				//printf(" %d ",max1);
+-				if(img1[i*WIDTH+j] > 150)
++				if(max1>250 && img1[i*Width+j] > 120)
+ 				{
+ 					count++;
+-					oricount[ori[i*WIDTH+j]-1]++;
+ 				}
+ 			}
+ 		}
++    feat[0] = (double)count/per;
+ 
+-	sum[0] = oricount[0]+oricount[7];
+-	for(i=1;i<8;i++)
+-	{
+-		sum[i] = oricount[i]+oricount[i-1];
+-	}
++	for(i = 6;i < Height-6;i++)
++        for(j = 6;j < Width-6;j++)
++		{
++			if(ori[i*Width+j] > 0 && ori[i*Width+j-1] > 0 && ori[i*Width+j+1] > 0
++					&& ori[(i-1)*Width+j] > 0 && ori[(i+1)*Width+j] > 0
++				    && ori[(i-1)*Width+j-1] > 0 && ori[(i-1)*Width+j+1]
++				    && ori[(i+1)*Width+j-1] && ori[(i+1)*Width+j-1]) {
++
++				count1 ++;
++				var_ori += abs(ori[i*Width+j] - ori[i*Width+j-1]) > 5 ? 1 : abs(ori[i*Width+j]
++				                - ori[i*Width+j-1])*abs(ori[i*Width+j] - ori[i*Width+j-1]);
++				var_ori += abs(ori[i*Width+j] - ori[i*Width+j+1]) > 5 ? 1 : abs(ori[i*Width+j]
++				                - ori[i*Width+j+1])*abs(ori[i*Width+j] - ori[i*Width+j+1]);
++		        var_ori += abs(ori[i*Width+j] - ori[(i-1)*Width+j]) > 5 ? 1 : abs(ori[i*Width+j]
++		                        - ori[(i-1)*Width+j])*abs(ori[i*Width+j] - ori[(i-1)*Width+j]);
++				var_ori += abs(ori[i*Width+j] - ori[(i+1)*Width+j]) > 5 ? 1 : abs(ori[i*Width+j]
++				                - ori[(i+1)*Width+j])*abs(ori[i*Width+j] - ori[(i+1)*Width+j]);
++				var_ori += abs(ori[i*Width+j] - ori[(i-1)*Width+j-1]) > 5 ? 1 : abs(ori[i*Width+j]
++				                - ori[(i-1)*Width+j-1])*abs(ori[i*Width+j] - ori[(i-1)*Width+j-1]);
++				var_ori += abs(ori[i*Width+j] - ori[(i-1)*Width+j+1]) > 5 ? 1 : abs(ori[i*Width+j]
++				                - ori[(i-1)*Width+j+1])*abs(ori[i*Width+j] - ori[(i-1)*Width+j+1]);
++				var_ori += abs(ori[i*Width+j] - ori[(i+1)*Width+j-1]) > 5 ? 1 : abs(ori[i*Width+j]
++				                - ori[(i+1)*Width+j-1])*abs(ori[i*Width+j] - ori[(i+1)*Width+j-1]);
++				var_ori += abs(ori[i*Width+j] - ori[(i+1)*Width+j-1]) > 5 ? 1 : abs(ori[i*Width+j]
++				                - ori[(i+1)*Width+j-1])*abs(ori[i*Width+j] - ori[(i+1)*Width+j-1]);
++			}
++		}
++    feat[1] = (double)(var_ori)/count1;
++	free(ori);
++}
+ 
+-	max1=sum[0];
+-	for(i=0;i<8;i++)
+-	{
+-		if(max1<sum[i])
+-			max1 = sum[i];
+-	}
++//计算梯度
++static double gradxy(u8*img1,int th)
++{
++	int i,j;
++	int num = 0;
++	double gradx = 0,grady = 0,grad;
++	double sum = 0;
+ 
+-	sum[0] = oricount[0]+oricount[7]+oricount[1];
+-	sum[7] = oricount[7]+oricount[6]+oricount[0];
+-	for(i=1;i<7;i++)
+-	{
+-		sum[i] = oricount[i]+oricount[i-1]+oricount[i+1];
+-	}
+-	max2=sum[0];
+-	for(i=0;i<8;i++)
+-	{
+-		if(max2<sum[i])
+-			max2 = sum[i];
+-	}
++	for(i = 2;i < Height-2;i++)
++        for(j = 2;j < Width-2;j++) {
++			if(img1[i*Width+j] > th) {
++			    num ++;
++				gradx = abs(img1[(i+1)*Width+j] - img1[(i-1)*Width+j] + img1[(i+1)*Width+j+1]
++				            - img1[(i-1)*Width+j+1] + img1[(i+1)*Width+j-1] - img1[(i-1)*Width+j-1]);
++				grady = abs(img1[(i+1)*Width+j+1] - img1[(i+1)*Width+j-1] + img1[(i-1)*Width+j+1]
++				            - img1[(i-1)*Width+j-1] + img1[i*Width+j+1] - img1[i*Width+j-1]);
++				grad = sqrt((double)(gradx*gradx+grady*grady));
++				if(grad>100) sum ++;
++			}
++		}
++    sum = sum*100/num;
++	return sum;
++}
++
++static double gradxy1(u8*img1,int th)
++{
++	int i,j;
++	int num1=0,num2=0,num3=0,num4=0;
++	double gradx = 0,grady = 0,grad;
++	double sum1=0,sum2=0,sum3=0,sum4=0;
++	double max;
++	for(i = 2;i < Height/2-2;i++)
++        for(j = 2;j < Width/2-2;j++) {
++			if(img1[i*Width+j] > th) {
++			    num1 ++;
++				gradx = abs(img1[(i+1)*Width+j] - img1[(i-1)*Width+j] + img1[(i+1)*Width+j+1]
++				            - img1[(i-1)*Width+j+1] + img1[(i+1)*Width+j-1] - img1[(i-1)*Width+j-1]);
++				grady = abs(img1[(i+1)*Width+j+1] - img1[(i+1)*Width+j-1] + img1[(i-1)*Width+j+1]
++				            - img1[(i-1)*Width+j-1] + img1[i*Width+j+1] - img1[i*Width+j-1]);
++				grad = sqrt((double)(gradx*gradx+grady*grady));
++				if(grad>150) sum1 ++;
++			}
++		}
++    for(i = 2;i < Height/2-2;i++)
++        for(j = Width/2-2;j < Width-2;j++) {
++			if(img1[i*Width+j] > th) {
++			    num2 ++;
++				gradx = abs(img1[(i+1)*Width+j] - img1[(i-1)*Width+j] + img1[(i+1)*Width+j+1]
++				            - img1[(i-1)*Width+j+1] + img1[(i+1)*Width+j-1] - img1[(i-1)*Width+j-1]);
++				grady = abs(img1[(i+1)*Width+j+1] - img1[(i+1)*Width+j-1] + img1[(i-1)*Width+j+1]
++				            - img1[(i-1)*Width+j-1] + img1[i*Width+j+1] - img1[i*Width+j-1]);
++				grad = sqrt((double)(gradx*gradx+grady*grady));
++				if(grad>150) sum2 ++;
++			}
++		}
++	for(i = Height/2+2;i < Height-2;i++)
++        for(j = 2;j < Width/2-2;j++) {
++			if(img1[i*Width+j] > th) {
++			    num3 ++;
++				gradx = abs(img1[(i+1)*Width+j] - img1[(i-1)*Width+j] + img1[(i+1)*Width+j+1]
++				            - img1[(i-1)*Width+j+1] + img1[(i+1)*Width+j-1] - img1[(i-1)*Width+j-1]);
++				grady = abs(img1[(i+1)*Width+j+1] - img1[(i+1)*Width+j-1] + img1[(i-1)*Width+j+1]
++				            - img1[(i-1)*Width+j-1] + img1[i*Width+j+1] - img1[i*Width+j-1]);
++				grad = sqrt((double)(gradx*gradx+grady*grady));
++				if(grad>150) sum3 ++;
++			}
++		}
++	for(i = Height/2+2;i < Height-2;i++)
++        for(j = Width/2+2;j < Width-2;j++) {
++			if(img1[i*Width+j] > th) {
++			    num4 ++;
++				gradx = abs(img1[(i+1)*Width+j] - img1[(i-1)*Width+j] + img1[(i+1)*Width+j+1]
++				            - img1[(i-1)*Width+j+1] + img1[(i+1)*Width+j-1] - img1[(i-1)*Width+j-1]);
++				grady = abs(img1[(i+1)*Width+j+1] - img1[(i+1)*Width+j-1] + img1[(i-1)*Width+j+1]
++				            - img1[(i-1)*Width+j-1] + img1[i*Width+j+1] - img1[i*Width+j-1]);
++				grad = sqrt((double)(gradx*gradx+grady*grady));
++				if(grad>150) sum4 ++;
++			}
++		}
+ 
+-	//printf("  %f %f ",(double)(max1)/count,(double)(max2)/count);
++    if(num1>0) sum1 = sum1*100/num1;
++	else sum1=0;
++	if(num2>0) sum2 = sum2*100/num2;
++	else sum2=0;
++	if(num3>0) sum3 = sum3*100/num3;
++	else sum3=0;
++	if(num4>0) sum4 = sum4*100/num4;
++	else sum4=0;
++
++	max=sum1;
++	if(max<sum2) max = sum2;
++	if(max<sum3) max = sum3;
++	if(max<sum4) max = sum4;
+ 
+-	return (double)(max2)/count;
++	return max;
+ }
+ 
+ /* 描述：区分手指和非手指按压
+  * 输入：去完背景后的8位图像
+- * return： 0~100手指返回其覆盖率   101 湿手指（部分脏污）  102 非手指，水，脏污   103 掌纹
+- *         -1 内存分配失败
++ * return： 0~100手指返回其覆盖率   101 部分脏污   102 非手指，脏污
+  */
+-int fp64_finger_detect(u8 *imgIn, u8 *imgTmp)
++int fp64_finger_detect(unsigned char *img1)
+ {
+-	int i, j, num = 0, ret = 0,flag;
++	int i, j, num = 0, ret = 0;
+ 	double per;
+-	double dec,gra,xian,var,ori;
+-	u8* imgSmooth = imgTmp;
+-	u8* imgClahe = imgTmp + WIDTH * HEIGHT;
+-	u8* imgRate = imgTmp + 2 * WIDTH * HEIGHT;
+-	u8* Oritation = imgTmp + 3 * WIDTH * HEIGHT;
+-	double feat[2];
+-
+-	per = press_percent(imgIn,imgRate);
++	double feat[5];
++	u8* img2 = (u8*) malloc(Width * Height * sizeof(u8));
++	u8* img3 = (u8*) malloc(Width * Height * sizeof(u8));
++	double dec;
++	double gra;
++	GaussianSmooth(img1, img2, 0.3);
++
++	//计算覆盖率，不管是什么
++	for (i = 2; i < Height - 2; i++)
++		for (j = 2; j < Width - 2; j++) {
++			if (img2[i * Width + j] > TH) {
++				num++;
++			}
++		}
++	per = (double) num * 100 / (Width - 4) / (Height - 4);
++
+ 	if (per < 10) { //无按压
+ 		ret = 102;
+-		goto end;
++		goto free_mem;
+ 	}
+-
+-    clahe(imgIn,imgRate,imgClahe);
+-	meanSmooth(imgClahe, imgSmooth);
+-	//save_bmp(savePath,imgSmooth, WIDTH, HEIGHT);
+-
+-	gradxy(imgSmooth,imgRate,150,feat);
+-	//printf("  gra = %f var = %f ",feat[0],feat[1]);
+-
+-	if (feat[0] > 40) {
+-		ret = per;
+-		goto end;
+-	}
+-	if (feat[0] < 25) {
++	mean_var(img2, feat);
++	if (feat[2] < 80) {
+ 		ret = 102;
+-		goto end;
++		goto free_mem;
+ 	}
+-
+-	xian = xianxingdu(imgSmooth, imgRate);
+-	//printf("  xian = %f  ",xian);
+-	if(xian == -1)
+-		return -1;
+-
+-	if(feat[0] < 25 && xian < 0.15)
++	clahe(img2, img3);
++	feat[4] = gradxy(img3,150);
++	if(feat[4]>65)
+ 	{
+-		ret = 102;//非手指，水，脏污
+-		goto end;
+-	}
+-
+-	if(xian >= 0.3 || (xian*100+feat[0]) > 65)
+-    {
+ 		ret = per;
+-		goto end;
++		goto free_mem;
+ 	}
+-    if(xian < 0.2)
+-    {
+-	    ret = 103;//掌纹palm
+-		goto end;
+-	}
+-
+-	ori = oritation(imgSmooth,imgRate,per,Oritation);
+-	//printf("  ori = %f  ",ori);
+ 
+-	dec = feat[0] + xian*100 + feat[1]- (ori < 0.65 ? 0.65 : ori)*100;
+-	//printf("  dec = %f  ",dec);
+-
+-	if (dec > 5) {
+-		ret = per;//掌纹palm
++	oritation(img2, per, feat);
++	dec = feat[4] - (feat[3] > 40) * 5 - feat[1] * 2;
++	if (dec < 30) {
++		gra = gradxy1(img2,120);
++		if(feat[0] < 7 || feat[0]+gra < 25) //feat[2] > 180
++		    ret = 102;
++		else
++			ret = 101;
+ 	}
+-	else ret = 103; //手指
++	else ret = per; //手指
++
++free_mem:
++	free(img2);
++	free(img3);
+ 
+-end:
+ 	return ret;
+ }
+ 
+@@ -578,16 +460,16 @@ end:
+  */
+ int fp64_finger_press(unsigned char *img1, unsigned char *img2) {
+ 	int i, j, var = 0;
+-	const int M = 4;
++	const int M = 4, W=64, H=64;
+ 	int count = 0;
+ 
+-	for (i = M; i < HEIGHT - M; i++)
+-		for (j = M; j < WIDTH - M; j++) {
+-			int tmp = img2[i * WIDTH + j] - img1[i * WIDTH + j];
++	for (i = M; i < H - M; i++)
++		for (j = M; j < W - M; j++) {
++			int tmp = img2[i * W + j] - img1[i * W + j];
+ 			var +=  tmp> 0 ? tmp: -tmp;
+ 			count++;
+ 		}
+-	var /= (WIDTH - 2*M) * (HEIGHT - 2*M);
++	var /= (W - 2*M) * (H - 2*M);
+ 
+ 	//LOGD("ret=%d var=%d count=%d\n", ret, var, count);
+ 
+diff --git a/fingerprint/service/soft_sensor/sensor64/algorithm/navigate.c b/fingerprint/service/soft_sensor/sensor64/algorithm/navigate.c
+index 6e79887..bd8c92d 100644
+--- a/fingerprint/service/soft_sensor/sensor64/algorithm/navigate.c
++++ b/fingerprint/service/soft_sensor/sensor64/algorithm/navigate.c
+@@ -386,15 +386,15 @@ int afs64_offset_tmp(uint8_t *imgBase, uint8_t *imgCur, uint8_t *imgBkg, int dif
+ 	pBase=imgBase+1;
+ 	pCur=imgCur+1;
+ 	pBkg = imgBkg+1;
+-	for(row=1; row<15; row++)
++	for(row=1; row<9; row++)
+ 	{
+-		for(col=1; col<13; col++)
++		for(col=1; col<9; col++)
+ 		{
+ 			numBase = 0;
+ 			aveBase = 0;
+ 			numCur = 0;
+ 			aveCur = 0; // 4*4
+-			for(i=0; i<4; i++,pCur+=97,pBase+=97,pBkg+=194)
++			for(i=0; i<4; i++,pCur+=65,pBase+=65,pBkg+=130)
+ 			{
+ 				aveCur += ((int)pCur[0] + (int)pCur[1] + (int)pCur[2] + (int)pCur[3] + (int)pCur[4] + (int)pCur[5] + (int)pCur[6] + (int)pCur[7] -
+ 					       (int)pBkg[0] - (int)pBkg[1] - (int)pBkg[2] - (int)pBkg[3] - (int)pBkg[4] - (int)pBkg[5] - (int)pBkg[6] - (int)pBkg[7] );
+@@ -430,15 +430,15 @@ int afs64_offset_tmp(uint8_t *imgBase, uint8_t *imgCur, uint8_t *imgBkg, int dif
+ 				centerCurX += col;
+ 				centerCurY += row;
+ 			}
+-			pBase -= 380;
+-			pCur -= 380;
+-			pBkg -= 768;
++			pBase -= 252;
++			pCur -= 252;
++			pBkg -= 512;
+ 		}
+-		pBase += 292;
+-		pCur += 292;
+-		pBkg += 680;
++		pBase += 196;
++		pCur += 196;
++		pBkg += 456;
+ 	}
+-	
++
+ 	if(pressAreaBase>8)
+ 	{
+ 		if(pressAreaCur>8)
+@@ -474,7 +474,7 @@ int afs64_offset_tmp(uint8_t *imgBase, uint8_t *imgCur, uint8_t *imgBkg, int dif
+ }
+ 
+ // 56*97
+-int getFirstArea(uint8_t *imgBkg, uint8_t *imgRaw, int *offset, int *centerX, int *centerY, int *difTH)
++int getFirstArea64(uint8_t *imgBkg, uint8_t *imgRaw, int *offset, int *centerX, int *centerY, int *difTH)
+ {
+ 	uint8_t *pBkg, *pCur;
+ 	int row,col,i;
+@@ -485,12 +485,12 @@ int getFirstArea(uint8_t *imgBkg, uint8_t *imgRaw, int *offset, int *centerX, in
+ 	dif = 0;
+ 	pCur = imgRaw;
+ 	pBkg = imgBkg;
+-	for(row=0;row<56;row++,pCur+=97,pBkg+=194)
++	for(row=0;row<32;row++,pCur+=65,pBkg+=130)
+ 	{
+ 		dif += ((int)pCur[0]-(int)pBkg[0]);
+-        //ALOGD("_tap cur:%d, bkg:%d\n",pCur[0],pBkg[0]);
++        //LOGD("_tap cur:%d, bkg:%d\n",pCur[0],pBkg[0]);
+ 	}
+-	dif /= 56; // �¶ȵ�Ӱ��
++	dif /= 32; // �¶ȵ�Ӱ��
+ 	dif += 16; //ǰ\u0178��Ҷ�����Ϊ16
+ 	aveTH = dif*32;
+ 
+@@ -501,14 +501,14 @@ int getFirstArea(uint8_t *imgBkg, uint8_t *imgRaw, int *offset, int *centerX, in
+ 	pCur=imgRaw+1;
+ 	maxAve = 0;
+ 	// 14*12
+-	for(row=1; row<15; row++)
++	for(row=1; row<9; row++)
+ 	{
+-		for(col=1; col<13; col++)
++		for(col=1; col<9; col++)
+ 		{
+ 			num = 0;
+ 			ave = 0; // 4*4
+ 			aveCur = 0;
+-			for(i=0; i<4; i++,pCur+=97,pBkg+=194)
++			for(i=0; i<4; i++,pCur+=65,pBkg+=130)
+ 			{
+ 				subCur = ((int)pCur[0] + (int)pCur[1] + (int)pCur[2] + (int)pCur[3] + (int)pCur[4] + (int)pCur[5] + (int)pCur[6] + (int)pCur[7]);
+ 				aveCur += subCur;
+@@ -532,11 +532,11 @@ int getFirstArea(uint8_t *imgBkg, uint8_t *imgRaw, int *offset, int *centerX, in
+ 				(*centerY) += row;
+ 				 pressArea++;
+ 			}
+-			pBkg -= 768;
+-			pCur -= 380;
++			pBkg -= 512;
++			pCur -= 252;
+ 		}
+-		pBkg += 680;
+-		pCur += 292;
++		pBkg += 456;
++		pCur += 196;
+ 	}
+ 	if(pressArea>10)
+ 	{
+@@ -558,7 +558,7 @@ int getFirstArea(uint8_t *imgBkg, uint8_t *imgRaw, int *offset, int *centerX, in
+ 		return 0;
+ }
+ 
+-int getNaviResult(int sumH, int sumH1, int sumW, int sumW1, int cntImg)
++int getNaviResult64(int sumH, int sumH1, int sumW, int sumW1, int cntImg)
+ {
+ 	// 0:none
+ 	// 1:up
+@@ -567,79 +567,59 @@ int getNaviResult(int sumH, int sumH1, int sumW, int sumW1, int cntImg)
+ 	// 4:left
+ 	// 5:click
+ 	int tmpH, tmpW, tmpH1, tmpW1;
++	const TH = 3;
+ 
+-	tmpH1 = (sumH1>0?sumH1:-sumH1);
+-	tmpW1 = (sumW1>0?sumW1:-sumW1);
+-	tmpH = (sumH>0?sumH:-sumH);
+-	tmpW = (sumW>0?sumW:-sumW);
++	tmpH1 = (sumH1 > 0 ? sumH1 : -sumH1);
++	tmpW1 = (sumW1 > 0 ? sumW1 : -sumW1);
++	tmpH = (sumH > 0 ? sumH : -sumH);
++	tmpW = (sumW > 0 ? sumW : -sumW);
+ 
+-	if(tmpH1>1 && tmpH1>tmpW1)
+-	{
+-		if(sumH1>0)
+-		    return 1;   //up
++	if (tmpH1 > TH && tmpH1 > tmpW1) {
++		if (sumH1 > 0)
++			return NAVI_UP; //up
+ 		else
+-			return 4;   //down
+-	}
+-	else if(tmpW1>1 && tmpW1>tmpH1)
+-	{
+-		if(sumW1>0)
+-			return 8;   //right
++			return NAVI_DOWN; //down
++	} else if (tmpW1 > TH && tmpW1 > tmpH1) {
++		if (sumW1 > 0)
++			return NAVI_RIGHT; //right
+ 		else
+-			return 2;   //left
+-	}
+-	else if(tmpH1>tmpW1 && cntImg>3 && tmpH>320)
+-	{
+-		if(sumH<0)
+-			return 1;  //up
++			return NAVI_LEFT; //left
++	} else if (tmpH1 > tmpW1 && cntImg > 3 && tmpH > 320) {
++		if (sumH < 0)
++			return NAVI_UP; //up
+ 		else
+-			return 4;  //down
+-	}
+-	else if(tmpW1>tmpH1 && cntImg>3 && tmpW>320)
+-	{
+-		if(sumW<0)
+-			return 8;   //right
++			return NAVI_DOWN; //down
++	} else if (tmpW1 > tmpH1 && cntImg > 3 && tmpW > 320) {
++		if (sumW < 0)
++			return NAVI_RIGHT; //right
+ 		else
+-			return 2;   //left
+-	}
+-	else if((tmpW1>0 || tmpH1>0) && cntImg>3)
+-	{
+-        if(tmpH>tmpW && tmpH>320)
+-        {
+-            if(sumH<0)
+-                return 1; //up
+-            else
+-                return 4; //down
+-        }
+-        else if(tmpW>tmpH && tmpW>320)
+-        {
+-            if(sumW<0)
+-                return 8; //right
+-            else
+-                return 2; //left
+-        }
+-        else
+-		    return 0;   
+-	}
+-    else if(cntImg>3)
+-    {
+-        if(tmpW>tmpH && tmpW>512)
+-        {
+-            if(sumW<0)
+-                return 8; //right
+-            else
+-                return 2; //left
+-        }
+-        else if(tmpH>tmpW && tmpH>512)
+-        {
+-            if(sumH<0)
+-                return 1; //up
+-            else
+-                return 4; //down
+-        }
+-    }
+-	else
+-	{
+-		return 0;   //click
++			return NAVI_LEFT; //left
++	} else if ((tmpW1 > 0 || tmpH1 > 0) && cntImg > 3) {
++		if (tmpH > tmpW && tmpH > 320) {
++			if (sumH < 0)
++				return NAVI_UP; //up
++			else
++				return NAVI_DOWN; //down
++		} else if (tmpW > tmpH && tmpW > 320) {
++			if (sumW < 0)
++				return NAVI_RIGHT; //right
++			else
++				return NAVI_LEFT; //left
++		}
++	} else if (cntImg > 3) {
++		if (tmpW > tmpH && tmpW > 512) {
++			if (sumW < 0)
++				return NAVI_RIGHT; //right
++			else
++				return NAVI_LEFT; //left
++		} else if (tmpH > tmpW && tmpH > 512) {
++			if (sumH < 0)
++				return NAVI_UP; //up
++			else
++				return NAVI_DOWN; //down
++		}
+ 	}
++
++	return NAVI_NONE;
+ }
+ 
+diff --git a/fingerprint/service/soft_sensor/sensor64/algorithm/removebkg.c b/fingerprint/service/soft_sensor/sensor64/algorithm/removebkg.c
+index 165c77e..4d1b9ab 100644
+--- a/fingerprint/service/soft_sensor/sensor64/algorithm/removebkg.c
++++ b/fingerprint/service/soft_sensor/sensor64/algorithm/removebkg.c
+@@ -9,7 +9,7 @@
+ #include "algorithm.h"
+ 
+ 
+-void preRmvBkg( u8* rawHead, u8* bkgHead, s16* srcHead , u8 srcOffset, int flag)
++void preRmvBkg64( u8* rawHead, u8* bkgHead, s16* srcHead , u8 srcOffset, int flag)
+ {
+     int row, col;
+     u8 *pRaw, *pBkg;
+@@ -125,7 +125,7 @@ void preRmvBkg( u8* rawHead, u8* bkgHead, s16* srcHead , u8 srcOffset, int flag)
+ }
+ 
+ // flag: 干扰标志
+-void rmvbkg_112( u8* imgRawBuf, u8* imgBkgBuf, u8* expHead, u8 srcOffset, int flag )
++void rmvbkg_64( u8* imgRawBuf, u8* imgBkgBuf, u8* expHead, u8 srcOffset, int flag )
+ {
+     int i, j, k;
+     int subTH, addr;
+@@ -146,7 +146,7 @@ void rmvbkg_112( u8* imgRawBuf, u8* imgBkgBuf, u8* expHead, u8 srcOffset, int fl
+     dif>>=6;
+     subTH = ((32 - (128-(int)srcOffset)*2 + dif)<<6);
+ 
+-    preRmvBkg( imgRawBuf, imgBkgBuf, srcHead, srcOffset, flag );
++    preRmvBkg64( imgRawBuf, imgBkgBuf, srcHead, srcOffset, flag );
+ 
+     pAveSub=(int*)expHead;
+     pVarSub=((int*)expHead)+64;
+@@ -251,7 +251,7 @@ void rmvbkg_112( u8* imgRawBuf, u8* imgBkgBuf, u8* expHead, u8 srcOffset, int fl
+ }
+ 
+ void fp64_remove_bkg(u8* imgRawBuf, u8* imgBkgBuf, u8* expHead, s16* srcHead, u8 grey_offset) {
+-    rmvbkg_112(imgRawBuf, imgBkgBuf, expHead, grey_offset, 0);
++    rmvbkg_64(imgRawBuf, imgBkgBuf, expHead, grey_offset, 0);
+ }
+ 
+ 
+diff --git a/fingerprint/service/soft_sensor/sensor64/sensor_wrapper.c b/fingerprint/service/soft_sensor/sensor64/sensor_wrapper.c
+index 97975b2..28e60b4 100644
+--- a/fingerprint/service/soft_sensor/sensor64/sensor_wrapper.c
++++ b/fingerprint/service/soft_sensor/sensor64/sensor_wrapper.c
+@@ -361,7 +361,7 @@ static int algorithm64_press_detect_texture(void *image, int type) {
+ 		save_press_bmp(AUTHENTICATE_DETECT, type, image_in);
+ 
+ 	    if(g_config.enable_dirty_check && type==AUTHENTICATE_DETECT ) {
+-	        g64_dirty = fp64_finger_detect(g64_authen_ctx->remove_bkg_img, context_get_read_img_buf());
++	        g64_dirty = fp64_finger_detect(g64_authen_ctx->remove_bkg_img);
+ 	        if(g64_dirty>100) {
+ 	            if(g64_authen_ctx->dirty_num>0) {
+ 	                var = fp64_finger_press(g64_authen_ctx->remove_bkg_pre, g64_authen_ctx->remove_bkg_img);
+@@ -484,10 +484,10 @@ static int algorithm64_navigate_tap(uint32_t *navi_result){
+ 
+ #ifdef SAVE_BMP_FILE
+         sprintf(name, "/data/system/users/0/fpdata/start.bmp");
+-        save_bmp_file(name, s64_navi_ctx->halfImgBuffer, 97, 56);
++        save_bmp_file(name, s64_navi_ctx->halfImgBuffer, 65, 64);
+ #endif
+ 
+-        ret = getFirstArea(context_get_sensor64_bkg(), s64_navi_ctx->halfImgBuffer, &grey_offset_calval, &preCenterX, &preCenterY, &difTH);
++        ret = getFirstArea64(context_get_sensor64_bkg(), s64_navi_ctx->halfImgBuffer, &grey_offset_calval, &preCenterX, &preCenterY, &difTH);
+         sensor_get_register(MA_112UM_GREY_OFST_REG, &grey_offset_regval);
+ 
+         if (ret == 1) {
+@@ -517,11 +517,17 @@ static int algorithm64_navigate_tap(uint32_t *navi_result){
+ 
+ #ifdef SAVE_BMP_FILE
+     sprintf(name, "/data/system/users/0/fpdata/navibase%.4d.bmp", num);
+-    save_bmp_file(name, s64_navi_ctx->imgBase, 97, 56);
++    save_bmp_file(name, s64_navi_ctx->imgBase, 65, 32);
+     sprintf(name, "/data/system/users/0/fpdata/navicur%.4d.bmp", num);
+-    save_bmp_file(name, s64_navi_ctx->imgCur, 97, 56);
++    save_bmp_file(name, s64_navi_ctx->imgCur, 65, 32);
+     sprintf(name, "/data/system/users/0/fpdata/bkg.bmp");
+-    save_bmp_file(name, context_get_sensor64_bkg(), 97, 112);
++    save_bmp_file(name, context_get_sensor64_bkg(), 65, 64);
++
++    sprintf(name, "/data/system/users/0/fpdata/navi_%.4d.txt", num);
++    save_rawdata_file(name, s64_navi_ctx->imgBase, 65, 32);
++    sprintf(name, "/data/system/users/0/fpdata/bkg_%.4d.txt", num);
++    save_rawdata_file(name, s64_navi_ctx->imgCur, 65, 32);
++
+     num++;
+ #endif
+ 
+@@ -576,8 +582,8 @@ static int algorithm64_navigate_tap(uint32_t *navi_result){
+     LOGD("absW:%d, absH:%d, maxVal:%d, xx:%d\n",absW,absH,maxVal,(9000-absH*400));
+     if (s64_pressFlag == 0) {
+         sensor_set_register(MA_112UM_GREY_OFST_REG, grey_offset_regval);
+-        LOGD("sumh = %d, sumw = %d, sumh1 = %d, sumw1 = %d, imgnum:%d\n", sumH, sumW, sumH1, sumW1, img_num);
+-        s64_navi_result = getNaviResult(sumH, sumH1, sumW, sumW1, img_num);
++        LOGD("  ---fht---sumh = %d, sumw = %d, sumh1 = %d, sumw1 = %d, imgnum:%d\n", sumH, sumW, sumH1, sumW1, img_num);
++        s64_navi_result = getNaviResult64(sumH, sumH1, sumW, sumW1, img_num);
+     }
+     if (*navi_result == NAVI_NONE) {
+         if (s64_pressFlag) {
+@@ -597,7 +603,7 @@ static int algorithm64_navigate_tap(uint32_t *navi_result){
+ }
+ 
+ static int algorithm64_navigate_direction(uint32_t *navi_result){
+-    *navi_result = s64_navi_result;
++    *navi_result = NAVI_NONE;
+     s64_navi_result = NAVI_NONE;
+     return SUCCESS;
+ }
+diff --git a/fingerprint/service/soft_sensor/sensor64/wrapper_v2.c b/fingerprint/service/soft_sensor/sensor64/wrapper_v2.c
+index 17cbf58..3f3cee0 100644
+--- a/fingerprint/service/soft_sensor/sensor64/wrapper_v2.c
++++ b/fingerprint/service/soft_sensor/sensor64/wrapper_v2.c
+@@ -166,7 +166,7 @@ static int algorithm64_enroll(void) {
+ 	save_enroll_bmp(enroll_image);
+ 
+     if (g_config.enable_dirty_check) {
+-        int dirty = fp64_finger_detect(enroll_image, context_get_read_img_buf());
++        int dirty = fp64_finger_detect(enroll_image);
+         if(dirty<80) {
+             ret = ERROR_ENROLL_PART_TOUCH;
+             goto clear;
+diff --git a/fingerprint/service/soft_sensor/sensor88/algorithm/algorithm.h b/fingerprint/service/soft_sensor/sensor88/algorithm/algorithm.h
+index bd1f373..91dbf37 100644
+--- a/fingerprint/service/soft_sensor/sensor88/algorithm/algorithm.h
++++ b/fingerprint/service/soft_sensor/sensor88/algorithm/algorithm.h
+@@ -25,7 +25,7 @@ int fp88_grey_test(int *imgBuf);
+ void fp88_get_move(int *imgRawBuf, int *imgBaseBuf, u8 *moveFlag);
+ int fp88_get_center(int* imgRawBuf, int* imgBkgBuf, u8 *pBlock, int *tmpCenter);
+ 
+-int fp88_finger_detect(u8 *imgIn, u8 *imgTmp);
++int fp88_finger_detect(u8 *imgIn);
+ int fp88_finger_press(unsigned char *img1,unsigned char *img2);
+ 
+ int fp88_testWet(int *imgRaw, int *imgBkg, int offset);
+diff --git a/fingerprint/service/soft_sensor/sensor88/algorithm/finger_detect.c b/fingerprint/service/soft_sensor/sensor88/algorithm/finger_detect.c
+index 1bbe43c..4af8c7f 100644
+--- a/fingerprint/service/soft_sensor/sensor88/algorithm/finger_detect.c
++++ b/fingerprint/service/soft_sensor/sensor88/algorithm/finger_detect.c
+@@ -1,427 +1,228 @@
+ #include <string.h>
+ #include <stdlib.h>
+-#include <math.h>
+-//#include "config.h"
++#include "malib.h"
++#include "config.h"
+ 
+-#define WIDTH 		88
+-#define HEIGHT 	88
+-#define TH 		60
+-#define GLCM_DIS 	4  //灰度共生矩阵的统计距离
++#define Width 88
++#define Height 88
++#define TH 20
++#define GLCM_DIS 3  //灰度共生矩阵的统计距离
+ #define GLCM_CLASS 8 //计算灰度共生矩阵的图像灰度值等级化
+-#define PI 3.141592653
+ typedef unsigned char u8;
+ 
+-static void meanSmooth(u8* imgIn,u8* imgSmooth)
++static void mean_var(u8 *img,double *feat)
+ {
+ 	int i,j;
+-	for(i=0;i<HEIGHT;i++)
+-        for(j=0;j<WIDTH;j++)
++	double mean = 0,var = 0;
++	int count = 0,count2 = 0;
++	for(i = 1;i < Height-1;i++)
++	{
++        for(j = 1;j < Width-1;j++)
+ 		{
+-			if( i < HEIGHT-1 && i > 0 && j < WIDTH-1 && j > 0)
+-				imgSmooth[i*WIDTH+j] = (4*imgIn[i*WIDTH+j] + 2*imgIn[(i-1)*WIDTH+j] + 2*imgIn[(i+1)*WIDTH+j] + 2*imgIn[i*WIDTH+j-1] + 2*imgIn[i*WIDTH+j+1]
+-			+ imgIn[(i-1)*WIDTH+j-1] + imgIn[(i-1)*WIDTH+j+1] + imgIn[(i+1)*WIDTH+j-1] + imgIn[(i+1)*WIDTH+j+1])/16;
+-			else
+-				imgSmooth[i*WIDTH+j] = imgIn[i*WIDTH+j];
++			if(img[i*Width+j] > 20)
++			{
++				mean += img[i*Width+j];
++				count ++;
++			}
+ 		}
+-}
++	}
++	mean /= count;
++	for(i = 1;i < Height-1;i++)
++	{
++        for(j = 1;j < Width-1;j++)
++		{
++			if(img[i*Width+j] > 20)
++			{
++				var += abs(img[i*Width+j]-mean);
++			}
++		}
++	}
+ 
+-//计算覆盖率
+-//输入：去背景后的图像
+-//return：覆盖率 0-100
+-static double press_percent(u8* imgSrc,u8* imgDst)
+-{
+-	 int i,j,k,m,value;
+-	 int count=0;
+-	 for(i=0;i<HEIGHT;i++)
+-        for(j=0;j<WIDTH;j++)
+-			if(imgSrc[i*WIDTH+j]>80)
+-				imgDst[i*WIDTH+j] = 255;
+-			else
+-				imgDst[i*WIDTH+j] = 0;
+-
+-	 for(i=2;i<HEIGHT-2;i++)
+-         for(j=2;j<WIDTH-2;j++)
+-	     {
+-		     if(imgDst[i*WIDTH+j] == 0)
+-		     {
+-	              value = 0;
+-			      unsigned char flag[8] = {0,0,0,0,0,0,0,0};
+-
+-			      for(m=1;m<=10;m++)
+-			      {
+-			  	      flag[0] = flag[0] || imgDst[(i-m)*WIDTH+j-m] == 255 ;
+-				      if( flag[0] ==1 || i-m < 2 || j-m < 2)
+-					      break;
+-			      }
+-			      for(m=1;m<=10;m++)
+-			      {
+-				      flag[1] = flag[1] || imgDst[(i+m)*WIDTH+j-m] == 255 ;
+-				      if( flag[1] ==1 || i+m > HEIGHT-2 || j-m < 2)
+-					      break;
+-			      }
+-			      for(m=1;m<=10;m++)
+-			      {
+-				      flag[2] = flag[2] || imgDst[(i-m)*WIDTH+j+m] == 255 ;
+-				      if( flag[2] ==1 || j+m > WIDTH-2 || i-m < 2)
+-					      break;
+-			      }
+-			      for(m=1;m<=10;m++)
+-			      {
+-				      flag[3] = flag[3] || imgDst[(i+m)*WIDTH+j+m] == 255 ;
+-				      if( flag[3] ==1 || i+m > HEIGHT-2 || j+m > WIDTH-2)
+-					      break;
+-			      }
+-			      //节省时间，前4个都是0，进入下一个循环
+-			      value = flag[0] + flag[1] + flag[2] + flag[3];
+-			      if(value < 1 )
+-				      continue;
+-
+-			      for(m=1;m<=10;m++)
+-			      {
+-				      flag[4] = flag[4] || imgDst[(i)*WIDTH+j-m] == 255 ;
+-				      if( flag[4] ==1 || j-m < 2)
+-					      break;
+-			      }
+-			      //节省时间，前5个有4个0，进入下一个循环
+-			      value = value + flag[4];
+-			      if(value < 2)
+-				      continue;
+-
+-			      for(m=1;m<=10;m++)
+-			      {
+-				      flag[5] = flag[5] || imgDst[(i)*WIDTH+j+m] == 255 ;
+-				      if( flag[5] ==1 || j+m > WIDTH-2)
+-					      break;
+-			      }
+-			      //节省时间，前6个有4个0，进入下一个循环
+-			      value = value + flag[5];
+-			      if(value < 3)
+-				      continue;
+-
+-			      for(m=1;m<=10;m++)
+-			      {
+-				      flag[6] = flag[6] || imgDst[(i-m)*WIDTH+j] == 255 ;
+-				      if( flag[6] ==1 || i-m < 2)
+-					      break;
+-			      }
+-			      //节省时间，前7个有4个0，进入下一个循环
+-			      value = value + flag[6];
+-			      if(value < 4)
+-				      continue;
+-
+-			      for(m=1;m<=10;m++)
+-			      {
+-				      flag[7] = flag[7] || imgDst[(i+m)*WIDTH+j] == 255 ;
+-				      if( flag[7] ==1 || i+m > HEIGHT-2)
+-					      break;
+-			      }
+-
+-			      value = value + flag[7];
+-			      if( value > 4)
+-			      {
+-				      imgDst[i*WIDTH+j] = 255;
+-					  count++;
+-			      }
+-		      }
+-			 else
+-				 count++;
+-	      }
+-
+-	 return (double) count * 100 / (WIDTH - 4) / (HEIGHT - 4);
++	var /= count;
++	feat[2] = mean;
++	feat[3] = var;
+ }
+ 
+-static void clahe(u8* imgSrc,u8 *imgRate,u8* imgDst)
++//图像增强
++static void clahe(u8* parry,u8* parry1)
+ {
+ 	int i, j, k, a;
+-	int sum = 1;
+-	int grayCount[256] = {0};
+-	int graySmooth[256] = {0};
++	int sum = 0;
++	int grayCount[256];
+ 	float s[256];
+ 	float s2[256];
+-	int grayValue,count_max= 0,flag,min=255,max=0;
+-
++	//int max, min;
++	int grayValue;
+ 	for (a = 0; a < 256; a++)
+ 		grayCount[a] = 0;
+-	for (i = 2; i < HEIGHT - 2; i++)
+-		for (j = 2; j < WIDTH - 2; j++) {
+-			grayValue = imgSrc[i * WIDTH + j];
+-			if (imgRate[i*WIDTH+j] > 0) {
++	for (i = 2; i < Height - 2; i++)
++		for (j = 2; j < Width - 2; j++) {
++			grayValue = parry[i * Width + j];
++			if (grayValue > 5) {
+ 				grayCount[grayValue]++;
+ 				sum++;
+ 			}
+ 		}
+-	for(i=10;i<250;i++)
+-	{
+-		graySmooth[i] = (grayCount[i] + grayCount[i-1] + grayCount[i+1])/3;
+-	}
+-	s[0] = 0;
++	s[0] = (float) grayCount[0] / (float) sum;
+ 	//灰度转换
+ 	for (k = 1; k < 256; k++) {
+-		s[k] = s[k - 1] + (float) graySmooth[k] / (float) sum;
++		s[k] = s[k - 1] + (float) grayCount[k] / (float) sum;
+ 	}
+ 	for (i = 0; i < 256; i++) {
+ 		s2[i] = (int) (255 * s[i] + 0.5);
+ 	}
+ 	//写入图像
+-	for (i = 0; i < HEIGHT; i++)
+-		for (j = 0; j < WIDTH; j++) {
+-			if(imgRate[i*WIDTH+j] > 0){
+-			    grayValue = imgSrc[i * WIDTH + j];
+-			    imgDst[i * WIDTH + j] = (u8) s2[grayValue];
+-			}
+-			else
+-				imgDst[i * WIDTH + j] = 0;
++	for (i = 0; i < Height; i++)
++		for (j = 0; j < Width; j++) {
++			int value = parry[i * Width + j];
++			//if(value>50)
++			parry1[i * Width + j] = (u8) s2[value];
++			//else
++			//    parry1[i*Width+j] = 0;
+ 		}
+ }
+ 
+-//计算梯度
+-static void gradxy(u8* imgSrc,u8 *imgRate,int th,double* feat)
++static double* CreatGauss(double sigma, int *pnWidowSize)
+ {
+-	int i,j;
+-	int num = 1;
+-	int num1=1,num2=1,num3=1,num4=1;
+-	double gradx = 0,grady = 0,grad;
+-	double sum1=0,sum2=0,sum3=0,sum4=0;
+-	double sum = 0;
+-	double max,min;
+-
+-	for(i = 2;i < HEIGHT-2;i++)
+-        for(j = 2;j < WIDTH-2;j++) {
+-			if(imgSrc[i*WIDTH+j] > th && imgRate[i*WIDTH+j] > 0 && imgRate[(i-1)*WIDTH+j] > 0 && imgRate[(i+1)*WIDTH+j] > 0
+-				&& imgRate[i*WIDTH+j-1] > 0 && imgRate[i*WIDTH+j+1] > 0) {
+-			    num ++;
+-				gradx = abs(imgSrc[(i+1)*WIDTH+j] - imgSrc[(i-1)*WIDTH+j] + imgSrc[(i+1)*WIDTH+j+1]
+-				            - imgSrc[(i-1)*WIDTH+j+1] + imgSrc[(i+1)*WIDTH+j-1] - imgSrc[(i-1)*WIDTH+j-1]);
+-				grady = abs(imgSrc[(i+1)*WIDTH+j+1] - imgSrc[(i+1)*WIDTH+j-1] + imgSrc[(i-1)*WIDTH+j+1]
+-				            - imgSrc[(i-1)*WIDTH+j-1] + imgSrc[i*WIDTH+j+1] - imgSrc[i*WIDTH+j-1]);
+-				grad = sqrt((double)(gradx*gradx+grady*grady));
+-
+-				if(grad>180) sum ++;
+-				if(i >= 2 && i < HEIGHT/2-2 && j >= 2 && j < WIDTH/2-2)
+-				{
+-					num1++;
+-					if(grad>180) sum1 ++;
+-				}
+-				if(i >= 2 && i < HEIGHT/2-2 && j >= WIDTH/2-2 && j < WIDTH-2)
+-				{
+-					num2++;
+-					if(grad>180) sum2 ++;
+-				}
+-				if(i >= HEIGHT/2+2 && i < HEIGHT-2 && j >= 2 && j < WIDTH/2-2)
+-				{
+-					num3++;
+-					if(grad>180) sum3 ++;
+-				}
+-				if(i >= HEIGHT/2+2 && i < HEIGHT-2 && j >= WIDTH/2-2 && j < WIDTH-2)
+-				{
+-					num4++;
+-					if(grad>180) sum4 ++;
+-				}
+-			}
+-		}
+-    sum = sum*100/num;
+-	if(num1>0) sum1 = sum1*100/num1;
+-	else sum1=0;
+-	if(num2>0) sum2 = sum2*100/num2;
+-	else sum2=0;
+-	if(num3>0) sum3 = sum3*100/num3;
+-	else sum3=0;
+-	if(num4>0) sum4 = sum4*100/num4;
+-	else sum4=0;
++	long i;
++	int nCenter; //数组中心点
++	double dDis; //数组中一点到中心点距离
++	double dValue; //中间变量
++	double dSum;
++
++	dSum = 0;
++	// [-3*sigma,3*sigma] 以内数据，会覆盖绝大部分滤波系数
++	*pnWidowSize = 1 + 2 * ceil(3 * sigma);
++	nCenter = (*pnWidowSize) / 2;
++	double *pdKernel = (double*) malloc(*pnWidowSize * sizeof(double));
++
++	//生成高斯数据
++	for (i = 0; i < (*pnWidowSize); i++) {
++		dDis = i - nCenter;
++		dValue = exp(-(1 / 2) * dDis * dDis / (sigma * sigma))
++				/ (sqrt(2 * 3.1415926) * sigma);
++		pdKernel[i] = dValue;
++		dSum += dValue;
++	}
++	//归一化
++	for (i = 0; i < (*pnWidowSize); i++) pdKernel[i] /= dSum;
+ 
+-	max=sum1;
+-	if(max<sum2) max = sum2;
+-	if(max<sum3) max = sum3;
+-	if(max<sum4) max = sum4;
+-	min=sum1;
+-	if(min>sum2) min = sum2;
+-	if(min>sum3) min = sum3;
+-	if(min>sum4) min = sum4;
+-	//printf(" var = %f ",max-min);
+-	feat[0] = sum;
+-	feat[1] = max-min;
++    return pdKernel;
+ }
+ 
+-/* 计算线性度
+- * @return 成功 >0, 失败  -1
+- */
+-static double xianxingdu(u8* imgSrc,u8* imgRate)
++//用高斯滤波器平滑原图像
++static void GaussianSmooth(u8* pGray, u8* pResult, double sigma)
+ {
+-	int i,j,l,k;
+-	double gradx,grady;
+-	float* sita = (float*)malloc(WIDTH*HEIGHT*sizeof(float));
+-	int PDd1[GLCM_CLASS*GLCM_CLASS] = {0};
+-	int PDd2[GLCM_CLASS*GLCM_CLASS] = {0};
+-	int PDd3[GLCM_CLASS*GLCM_CLASS] = {0};
+-	int PDd4[GLCM_CLASS*GLCM_CLASS] = {0};
+-	int PDd5[GLCM_CLASS*GLCM_CLASS] = {0};
+-	int PDd6[GLCM_CLASS*GLCM_CLASS] = {0};
+-	int PDd7[GLCM_CLASS*GLCM_CLASS] = {0};
+-	int PDd8[GLCM_CLASS*GLCM_CLASS] = {0};
+-
+-	double f[8] = {0,0,0,0,0,0,0,0};
+-	double g[8] = {0,0,0,0,0,0,0,0};
+-	double tempM[8];
+-	double fea1,fea2;
+-
+-	if(sita == NULL) return -1;
+-	for(i = 0;i < HEIGHT;i++)
+-		for(j = 0;j < WIDTH;j++)
+-		{
+-			sita[i*WIDTH+j] = 0;
+-		}
+-
+-	for(i = 1;i < HEIGHT-1;i++)
+-        for(j = 1;j < WIDTH-1;j++)
+-		{
+-			if(imgRate[i*WIDTH+j] > 0)
+-			{
+-				gradx = imgSrc[i*WIDTH+j-1] - imgSrc[i*WIDTH+j+1] //+ img1[(i-2)*WIDTH+j+1] - img1[(i-2)*WIDTH+j-1]// + img1[(i-3)*WIDTH+j+1] - img1[(i-3)*WIDTH+j-1]
+-				+ imgSrc[(i-1)*WIDTH+j-1] - imgSrc[(i-1)*WIDTH+j+1] //+ img1[(i+2)*WIDTH+j+1] - img1[(i+2)*WIDTH+j-1]// + img1[(i+3)*WIDTH+j+1] - img1[(i+3)*WIDTH+j-1]
+-				+ imgSrc[(i+1)*WIDTH+j-1] - imgSrc[(i+1)*WIDTH+j+1];
+-
+-				grady = imgSrc[(i+1)*WIDTH+j] - imgSrc[(i-1)*WIDTH+j] //+ img1[(i+1)*WIDTH+j-2] - img1[(i-1)*WIDTH+j-2]// + img1[(i+1)*WIDTH+j-3] - img1[(i-1)*WIDTH+j-3]
+-				+ imgSrc[(i+1)*WIDTH+j-1] - imgSrc[(i-1)*WIDTH+j-1] //+ img1[(i+1)*WIDTH+j+2] - img1[(i-1)*WIDTH+j+2]// + img1[(i+1)*WIDTH+j+3] - img1[(i-1)*WIDTH+j+3]
+-				+ imgSrc[(i+1)*WIDTH+j+1] - imgSrc[(i-1)*WIDTH+j+1];
+-
+-				sita[i*WIDTH+j] = atan((float)grady/gradx) + PI/2;
+-				//printf("  %f  ",sita[i*WIDTH+j]);
++    long x, y;
++	long i;
++	int nWindowSize; //高斯滤波器长度
++	int nLen; //窗口长度
++	double dDotMul;   //高斯系数与图像数据的点乘
++	double dWeightSum; //产生一维高斯数据
++	double *pdKernel; //一维高斯滤波器
++
++    //滤波系数总和
++    double *pdTemp = (double*)malloc(Width*Height*sizeof(double));
++
++    //产生一维高斯数据
++    //CreatGauss(sigma, &pdKernel, &nWindowSize);
++    pdKernel = CreatGauss(sigma, &nWindowSize);
++
++    nLen = nWindowSize/2;
++    //x方向滤波
++	for (y = 0; y < Height; y++) {
++		for (x = 0; x < Width; x++) {
++			dDotMul = 0;
++			dWeightSum = 0;
++			for (i = (-nLen); i <= nLen; i++) {
++				//判断是否在图像内部
++				if ((i + x) >= 0 && (i + x) < Width) {
++					dDotMul += (double) pGray[y * Width + (i + x)] * pdKernel[nLen + i];
++					dWeightSum += pdKernel[nLen + i];
++				}
+ 			}
++			pdTemp[y * Width + x] = dDotMul / dWeightSum;
+ 		}
+-	for(i=GLCM_DIS+2;i<HEIGHT-GLCM_DIS-2;i++)
+-		for(j=GLCM_DIS+2;j<WIDTH-GLCM_DIS-2;j++)
+-			if(imgRate[i*WIDTH+j] > 0 && imgSrc[i*WIDTH+j] > TH)
+-			{
+-			    for(l=0;l<GLCM_CLASS;l++)
+-				    for(k=0;k<GLCM_CLASS;k++)
+-				    {
+-
+-					    if( imgSrc[(i+GLCM_DIS)*WIDTH+j] > TH && (sita[i*WIDTH+j] >=((l-1)*PI/GLCM_CLASS) && sita[i*WIDTH+j] < ((2*(l-1)+1)*PI/2/GLCM_CLASS) )
+-						    && (sita[(i+GLCM_DIS)*WIDTH+j] >= ((k-1)*PI/GLCM_CLASS) && sita[(i+GLCM_DIS)*WIDTH+j] < (2*(k-1)+1)*PI/2/GLCM_CLASS) )
+-						    PDd1[l*GLCM_CLASS+k] ++ ;
+-
+-					    if( imgSrc[(i-GLCM_DIS)*WIDTH+j] > TH && (sita[i*WIDTH+j] >=((l-1)*PI/GLCM_CLASS) && sita[i*WIDTH+j] < ((2*(l-1)+1)*PI/2/GLCM_CLASS) )
+-						    && (sita[(i-GLCM_DIS)*WIDTH+j] >= ((k-1)*PI/GLCM_CLASS) && sita[(i-GLCM_DIS)*WIDTH+j] < (2*(k-1)+1)*PI/2/GLCM_CLASS) )
+-						    PDd2[l*GLCM_CLASS+k] ++ ;
+-
+-					    if( imgSrc[i*WIDTH+j+GLCM_DIS] > TH && (sita[i*WIDTH+j] >=((l-1)*PI/GLCM_CLASS) && sita[i*WIDTH+j] < ((2*(l-1)+1)*PI/2/GLCM_CLASS) )
+-						    && (sita[i*WIDTH+j+GLCM_DIS] >= ((k-1)*PI/GLCM_CLASS) && sita[i*WIDTH+j+GLCM_DIS] < (2*(k-1)+1)*PI/2/GLCM_CLASS) )
+-					   	    PDd3[l*GLCM_CLASS+k] ++ ;
+-
+-					    if( imgSrc[i*WIDTH+j-GLCM_DIS] > TH &&  (sita[i*WIDTH+j] >=((l-1)*PI/GLCM_CLASS) && sita[i*WIDTH+j] < ((2*(l-1)+1)*PI/2/GLCM_CLASS) )
+-						    && (sita[i*WIDTH+j-GLCM_DIS] >= ((k-1)*PI/GLCM_CLASS) && sita[i*WIDTH+j-GLCM_DIS] < (2*(k-1)+1)*PI/2/GLCM_CLASS) )
+-						    PDd4[l*GLCM_CLASS+k] ++ ;
+-
+-					    if( imgSrc[(i+GLCM_DIS)*WIDTH+j+GLCM_DIS] > TH &&  (sita[i*WIDTH+j] >=((l-1)*PI/GLCM_CLASS) && sita[i*WIDTH+j] < ((2*(l-1)+1)*PI/2/GLCM_CLASS) )
+-						    && (sita[(i+GLCM_DIS)*WIDTH+j+GLCM_DIS] >= ((k-1)*PI/GLCM_CLASS) && sita[(i+GLCM_DIS)*WIDTH+j+GLCM_DIS] < (2*(k-1)+1)*PI/2/GLCM_CLASS) )
+-						    PDd5[l*GLCM_CLASS+k] ++ ;
+-
+-					    if( imgSrc[(i-GLCM_DIS)*WIDTH+j+GLCM_DIS] > TH &&  (sita[i*WIDTH+j] >=((l-1)*PI/GLCM_CLASS) && sita[i*WIDTH+j] < ((2*(l-1)+1)*PI/2/GLCM_CLASS) )
+-						    && (sita[(i-GLCM_DIS)*WIDTH+j+GLCM_DIS] >= ((k-1)*PI/GLCM_CLASS) && sita[(i-GLCM_DIS)*WIDTH+j+GLCM_DIS] < (2*(k-1)+1)*PI/2/GLCM_CLASS) )
+-						    PDd6[l*GLCM_CLASS+k] ++ ;
+-
+-					    if( imgSrc[(i+GLCM_DIS)*WIDTH+j-GLCM_DIS] > TH &&  (sita[i*WIDTH+j] >=((l-1)*PI/GLCM_CLASS) && sita[i*WIDTH+j] < ((2*(l-1)+1)*PI/2/GLCM_CLASS) )
+-						    && (sita[(i+GLCM_DIS)*WIDTH+j-GLCM_DIS] >= ((k-1)*PI/GLCM_CLASS) && sita[(i+GLCM_DIS)*WIDTH+j-GLCM_DIS] < (2*(k-1)+1)*PI/2/GLCM_CLASS) )
+-						    PDd7[l*GLCM_CLASS+k] ++ ;
+-
+-					    if( imgSrc[(i-GLCM_DIS)*WIDTH+j-GLCM_DIS] > TH &&  (sita[i*WIDTH+j] >=((l-1)*PI/GLCM_CLASS) && sita[i*WIDTH+j] < ((2*(l-1)+1)*PI/2/GLCM_CLASS) )
+-						    && (sita[(i-GLCM_DIS)*WIDTH+j-GLCM_DIS] >= ((k-1)*PI/GLCM_CLASS) && sita[(i-GLCM_DIS)*WIDTH+j-GLCM_DIS] < (2*(k-1)+1)*PI/2/GLCM_CLASS) )
+-						    PDd8[l*GLCM_CLASS+k] ++ ;
+-					}
+-				}
+-	 for(i = 0;i < GLCM_CLASS;i++)
+-         for (j = 0;j < GLCM_CLASS;j++)
+-		 {
+-			 f[0] += (double)PDd1[i*GLCM_CLASS+j]*cos((i-j)*2*PI/GLCM_CLASS);
+-			 g[0] += PDd1[i*GLCM_CLASS+j];
+-
+-			 f[1] += (double)PDd2[i*GLCM_CLASS+j]*cos((i-j)*2*PI/GLCM_CLASS);
+-			 g[1] += PDd2[i*GLCM_CLASS+j];
+-
+-			 f[2] += (double)PDd3[i*GLCM_CLASS+j]*cos((i-j)*2*PI/GLCM_CLASS);
+-			 g[2] += PDd3[i*GLCM_CLASS+j];
+-
+-			 f[3] += (double)PDd4[i*GLCM_CLASS+j]*cos((i-j)*2*PI/GLCM_CLASS);
+-			 g[3] += PDd4[i*GLCM_CLASS+j];
+-
+-			 f[4] += (double)PDd5[i*GLCM_CLASS+j]*cos((i-j)*2*PI/GLCM_CLASS);
+-			 g[4] += PDd5[i*GLCM_CLASS+j];
+-
+-			 f[5] += (double)PDd6[i*GLCM_CLASS+j]*cos((i-j)*2*PI/GLCM_CLASS);
+-			 g[5] += PDd6[i*GLCM_CLASS+j];
+-
+-			 f[6] += (double)PDd7[i*GLCM_CLASS+j]*cos((i-j)*2*PI/GLCM_CLASS);
+-			 g[6] += PDd7[i*GLCM_CLASS+j];
+-
+-			 f[7] += (double)PDd8[i*GLCM_CLASS+j]*cos((i-j)*2*PI/GLCM_CLASS);
+-			 g[7] += PDd8[i*GLCM_CLASS+j];
+-		 }
++	}
+ 
+-	tempM[0] = f[0]/g[0];
+-	fea1 = tempM[0];
+-	for(i=1;i<8;i++)
+-	{
+-		tempM[i] = (double)f[i]/g[i];
+-		fea1 += tempM[i];
++    //y方向滤波
++    for(x=0; x<Width;x++)  {
++       for(y=0; y<Height; y++)
++	   {
++          dDotMul = 0;
++		  dWeightSum = 0;
++              for(i=(-nLen);i<=nLen;i++)
++			  {
++                  if((i+y)>=0 && (i+y)< Height)
++				  {
++                      dDotMul += (double)pdTemp[(y+i)*Width+x]*pdKernel[nLen+i];
++					  dWeightSum += pdKernel[nLen+i];
++				  }
++			  }
++          pResult[y*Width+x] = (unsigned char)dDotMul/dWeightSum;
++	   }
+ 	}
+-	fea1 /= 8;
+-	if(sita != NULL)
+-	    free(sita);
+ 
+-	return fea1;
++    free(pdKernel);
++    free(pdTemp);
++	pdKernel = NULL;
++	pdTemp = NULL;
+ }
+ 
+-static double oritation(u8* img1,u8* imgRate,double per,u8* ori)
++//计算方向
++static void oritation(u8*img1,double per,double *feat)
+ {
+-	int i,j,x,y;
++	int i,j;
+ 	double gradx = 0,grady = 0,grad;
+-	int D1,D2,D3,D4,D5,D6,D7,D8,V1,V2,V3,V4,max1,max2,count=0,count1=0,temp;
++	int D1,D2,D3,D4,D5,D6,D7,D8,V1,V2,V3,V4,max1,max2,count=0,count1=0;
++	u8* ori = (u8*)malloc(Width*Height*sizeof(u8));
+ 	unsigned int oricount[9] = {0,0,0,0,0,0,0,0};
+ 	unsigned int sum[8] = {0,0,0,0,0,0,0,0};
+-	double var_ori = 0;
++	int var_ori = 0;
+ 
+-	for(i = 0;i < HEIGHT;i++)
+-		for(j = 0;j < WIDTH;j++)
++	for(i = 0;i < Height;i++)
++		for(j = 0;j < Width;j++)
+ 		{
+-			ori[i*WIDTH+j] = 0;
++			ori[i*Width+j] = 0;
+ 		}
+ 
+-	for(i = 5;i < HEIGHT-5;i++)
+-        for(j = 5;j < WIDTH-5;j++)
++	for(i = 5;i < Height-5;i++)
++        for(j = 5;j < Width-5;j++)
+ 		{
+-			if(imgRate[i*WIDTH+j] > 0)
++			if(img1[i*Width+j] > 20)
+ 			{
+-				D1 = abs(img1[i*WIDTH+j+3]-img1[i*WIDTH+j]) + abs(img1[i*WIDTH+j+2]-img1[i*WIDTH+j])
+-					+ abs(img1[i*WIDTH+j+1]-img1[i*WIDTH+j]) + abs(img1[i*WIDTH+j-1]-img1[i*WIDTH+j])
+-					+ abs(img1[i*WIDTH+j-2]-img1[i*WIDTH+j]) + abs(img1[i*WIDTH+j-3]-img1[i*WIDTH+j]) ;
+-
+-				D2 = abs(img1[(i+2)*WIDTH+j-3]-img1[i*WIDTH+j]) + abs(img1[(i+1)*WIDTH+j-3]-img1[i*WIDTH+j])
+-					+ abs(img1[(i+1)*WIDTH+j-2]-img1[i*WIDTH+j]) + abs(img1[(i-1)*WIDTH+j+2]-img1[i*WIDTH+j])
+-					+ abs(img1[(i-1)*WIDTH+j+3]-img1[i*WIDTH+j]) + abs(img1[(i-2)*WIDTH+j+3]-img1[i*WIDTH+j]) ;
+-
+-				D3 = abs(img1[(i+3)*WIDTH+j-3]-img1[i*WIDTH+j]) + abs(img1[(i+2)*WIDTH+j-2]-img1[i*WIDTH+j])
+-					+ abs(img1[(i+1)*WIDTH+j-1]-img1[i*WIDTH+j]) + abs(img1[(i-1)*WIDTH+j+1]-img1[i*WIDTH+j])
+-					+ abs(img1[(i-2)*WIDTH+j+2]-img1[i*WIDTH+j]) + abs(img1[(i-3)*WIDTH+j+3]-img1[i*WIDTH+j]) ;
+-
+-                D4 = abs(img1[(i+3)*WIDTH+j-2]-img1[i*WIDTH+j]) + abs(img1[(i+3)*WIDTH+j-1]-img1[i*WIDTH+j])
+-					+ abs(img1[(i+2)*WIDTH+j-1]-img1[i*WIDTH+j]) + abs(img1[(i-2)*WIDTH+j+1]-img1[i*WIDTH+j])
+-					+ abs(img1[(i-3)*WIDTH+j+1]-img1[i*WIDTH+j]) + abs(img1[(i-3)*WIDTH+j+2]-img1[i*WIDTH+j]) ;
+-
+-                D5 = abs(img1[(i+3)*WIDTH+j]-img1[i*WIDTH+j]) + abs(img1[(i+2)*WIDTH+j]-img1[i*WIDTH+j])
+-					+ abs(img1[(i+1)*WIDTH+j]-img1[i*WIDTH+j]) + abs(img1[(i-1)*WIDTH+j]-img1[i*WIDTH+j])
+-					+ abs(img1[(i-2)*WIDTH+j]-img1[i*WIDTH+j]) + abs(img1[(i-3)*WIDTH+j]-img1[i*WIDTH+j]);
+-
+-                D6 = abs(img1[(i+3)*WIDTH+j+2]-img1[i*WIDTH+j]) + abs(img1[(i+3)*WIDTH+j+1]-img1[i*WIDTH+j])
+-					+ abs(img1[(i+2)*WIDTH+j+1]-img1[i*WIDTH+j]) + abs(img1[(i-2)*WIDTH+j-1]-img1[i*WIDTH+j])
+-					+ abs(img1[(i-3)*WIDTH+j-1]-img1[i*WIDTH+j]) + abs(img1[(i-3)*WIDTH+j-2]-img1[i*WIDTH+j]) ;
+-
+-                D7 = abs(img1[(i+3)*WIDTH+j+3]-img1[i*WIDTH+j]) + abs(img1[(i+2)*WIDTH+j+2]-img1[i*WIDTH+j])
+-					+ abs(img1[(i+1)*WIDTH+j+1]-img1[i*WIDTH+j]) + abs(img1[(i-1)*WIDTH+j-1]-img1[i*WIDTH+j])
+-					+ abs(img1[(i-2)*WIDTH+j-2]-img1[i*WIDTH+j]) + abs(img1[(i-3)*WIDTH+j-3]-img1[i*WIDTH+j]) ;
+-
+-                D8 = abs(img1[(i+2)*WIDTH+j+3]-img1[i*WIDTH+j]) + abs(img1[(i+1)*WIDTH+j+3]-img1[i*WIDTH+j])
+-					+ abs(img1[(i+1)*WIDTH+j+2]-img1[i*WIDTH+j]) + abs(img1[(i-1)*WIDTH+j-2]-img1[i*WIDTH+j])
+-					+ abs(img1[(i-1)*WIDTH+j-3]-img1[i*WIDTH+j]) + abs(img1[(i-2)*WIDTH+j-3]-img1[i*WIDTH+j]) ;
++				D1 = abs(img1[i*Width+j+4]-img1[i*Width+j]) + abs(img1[i*Width+j+3]-img1[i*Width+j])
++					+ abs(img1[i*Width+j+2]-img1[i*Width+j]) + abs(img1[i*Width+j+1]-img1[i*Width+j])
++				    + abs(img1[i*Width+j-1]-img1[i*Width+j]) + abs(img1[i*Width+j-2]-img1[i*Width+j])
++					+ abs(img1[i*Width+j-3]-img1[i*Width+j]) + abs(img1[i*Width+j-4]-img1[i*Width+j]) ;
++				D2 = abs(img1[(i+2)*Width+j-4]-img1[i*Width+j]) + abs(img1[(i+2)*Width+j-3]-img1[i*Width+j])
++				    + abs(img1[(i+1)*Width+j-3]-img1[i*Width+j]) + abs(img1[(i+1)*Width+j-2]-img1[i*Width+j])
++				    + abs(img1[(i-1)*Width+j+2]-img1[i*Width+j]) + abs(img1[(i-1)*Width+j+3]-img1[i*Width+j])
++					+ abs(img1[(i-2)*Width+j+3]-img1[i*Width+j]) + abs(img1[(i-2)*Width+j+4]-img1[i*Width+j]);
++				D3 = abs(img1[(i+4)*Width+j-4]-img1[i*Width+j]) + abs(img1[(i+3)*Width+j-3]-img1[i*Width+j])
++				    + abs(img1[(i+2)*Width+j-2]-img1[i*Width+j]) + abs(img1[(i+1)*Width+j-1]-img1[i*Width+j])
++				    + abs(img1[(i-1)*Width+j+1]-img1[i*Width+j]) + abs(img1[(i-2)*Width+j+2]-img1[i*Width+j])
++					+ abs(img1[(i-3)*Width+j+3]-img1[i*Width+j]) + abs(img1[(i-4)*Width+j+4]-img1[i*Width+j]);
++                D4 = abs(img1[(i+4)*Width+j-2]-img1[i*Width+j]) + abs(img1[(i+3)*Width+j-2]-img1[i*Width+j])
++				    + abs(img1[(i+3)*Width+j-1]-img1[i*Width+j]) + abs(img1[(i+2)*Width+j-1]-img1[i*Width+j])
++				    + abs(img1[(i-2)*Width+j+1]-img1[i*Width+j]) + abs(img1[(i-3)*Width+j+1]-img1[i*Width+j])
++					+ abs(img1[(i-3)*Width+j+2]-img1[i*Width+j]) + abs(img1[(i-4)*Width+j+2]-img1[i*Width+j]);
++                D5 = abs(img1[(i+4)*Width+j]-img1[i*Width+j]) + abs(img1[(i+3)*Width+j]-img1[i*Width+j])
++				    + abs(img1[(i+2)*Width+j]-img1[i*Width+j]) + abs(img1[(i+1)*Width+j]-img1[i*Width+j])
++				    + abs(img1[(i-1)*Width+j]-img1[i*Width+j]) + abs(img1[(i-2)*Width+j]-img1[i*Width+j])
++					+ abs(img1[(i-3)*Width+j]-img1[i*Width+j]) + abs(img1[(i-4)*Width+j]-img1[i*Width+j]);
++                D6 = abs(img1[(i+4)*Width+j+2]-img1[i*Width+j]) + abs(img1[(i+3)*Width+j+2]-img1[i*Width+j])
++				    + abs(img1[(i+3)*Width+j+1]-img1[i*Width+j]) + abs(img1[(i+2)*Width+j+1]-img1[i*Width+j])
++				    + abs(img1[(i-2)*Width+j-1]-img1[i*Width+j]) + abs(img1[(i-3)*Width+j-1]-img1[i*Width+j])
++					+ abs(img1[(i-3)*Width+j-2]-img1[i*Width+j]) + abs(img1[(i-4)*Width+j-2]-img1[i*Width+j]);
++                D7 = abs(img1[(i+4)*Width+j+4]-img1[i*Width+j]) + abs(img1[(i+3)*Width+j+3]-img1[i*Width+j])
++				    + abs(img1[(i+2)*Width+j+2]-img1[i*Width+j]) + abs(img1[(i+1)*Width+j+1]-img1[i*Width+j])
++				    + abs(img1[(i-1)*Width+j-1]-img1[i*Width+j]) + abs(img1[(i-2)*Width+j-2]-img1[i*Width+j])
++					+ abs(img1[(i-3)*Width+j-3]-img1[i*Width+j]) + abs(img1[(i-4)*Width+j-4]-img1[i*Width+j]);
++                D8 = abs(img1[(i+2)*Width+j+4]-img1[i*Width+j]) + abs(img1[(i+2)*Width+j+3]-img1[i*Width+j])
++				    + abs(img1[(i+1)*Width+j+3]-img1[i*Width+j]) + abs(img1[(i+1)*Width+j+2]-img1[i*Width+j])
++				    + abs(img1[(i-1)*Width+j-2]-img1[i*Width+j]) + abs(img1[(i-1)*Width+j-3]-img1[i*Width+j])
++					+ abs(img1[(i-2)*Width+j-3]-img1[i*Width+j]) + abs(img1[(i-2)*Width+j-4]-img1[i*Width+j]);
+ 
+                 V1 = abs(D1-D5);
+ 				V2 = abs(D2-D6);
+@@ -430,169 +231,249 @@ static double oritation(u8* img1,u8* imgRate,double per,u8* ori)
+ 
+ 				max1 = V1;
+ 				if (D1 > D5) {
+-					ori[i * WIDTH + j] = 5;
++					ori[i * Width + j] = 5;
+ 				} else {
+-					ori[i * WIDTH + j] = 1;
++					ori[i * Width + j] = 1;
+ 				}
+ 				if (max1 < V2) {
+ 					max1 = V2;
+ 					if (D2 > D6) {
+-						ori[i * WIDTH + j] = 6;
++						ori[i * Width + j] = 6;
+ 					} else {
+-						ori[i * WIDTH + j] = 2;
++						ori[i * Width + j] = 2;
+ 					}
+ 				}
+ 				if (max1 < V3) {
+ 					max1 = V3;
+ 					if (D3 > D7) {
+-						ori[i * WIDTH + j] = 7;
++						ori[i * Width + j] = 7;
+ 					} else {
+-						ori[i * WIDTH + j] = 3;
++						ori[i * Width + j] = 3;
+ 					}
+ 				}
+ 				if (max1 < V4) {
+ 					max1 = V4;
+ 					if (D4 > D8) {
+-						ori[i * WIDTH + j] = 8;
++						ori[i * Width + j] = 8;
+ 					} else {
+-						ori[i * WIDTH + j] = 4;
++						ori[i * Width + j] = 4;
+ 					}
+ 				}
+ 				//printf(" %d ",max1);
+-				if(img1[i*WIDTH+j] > 150)
++				if(max1>250 && img1[i*Width+j] > 120)
+ 				{
+ 					count++;
+-					oricount[ori[i*WIDTH+j]-1]++;
+ 				}
+ 			}
+ 		}
++    feat[0] = (double)count/per;
++	
++	for(i = 6;i < Height-6;i++)
++        for(j = 6;j < Width-6;j++)
++		{
++			if(ori[i*Width+j] > 0 && ori[i*Width+j-1] > 0 && ori[i*Width+j+1] > 0
++					&& ori[(i-1)*Width+j] > 0 && ori[(i+1)*Width+j] > 0
++				    && ori[(i-1)*Width+j-1] > 0 && ori[(i-1)*Width+j+1]
++				    && ori[(i+1)*Width+j-1] && ori[(i+1)*Width+j-1]) {
++                
++				count1 ++;
++				var_ori += abs(ori[i*Width+j] - ori[i*Width+j-1]) > 5 ? 1 : abs(ori[i*Width+j]
++				                - ori[i*Width+j-1])*abs(ori[i*Width+j] - ori[i*Width+j-1]);
++				var_ori += abs(ori[i*Width+j] - ori[i*Width+j+1]) > 5 ? 1 : abs(ori[i*Width+j]
++				                - ori[i*Width+j+1])*abs(ori[i*Width+j] - ori[i*Width+j+1]);
++		        var_ori += abs(ori[i*Width+j] - ori[(i-1)*Width+j]) > 5 ? 1 : abs(ori[i*Width+j]
++		                        - ori[(i-1)*Width+j])*abs(ori[i*Width+j] - ori[(i-1)*Width+j]);
++				var_ori += abs(ori[i*Width+j] - ori[(i+1)*Width+j]) > 5 ? 1 : abs(ori[i*Width+j]
++				                - ori[(i+1)*Width+j])*abs(ori[i*Width+j] - ori[(i+1)*Width+j]);
++				var_ori += abs(ori[i*Width+j] - ori[(i-1)*Width+j-1]) > 5 ? 1 : abs(ori[i*Width+j]
++				                - ori[(i-1)*Width+j-1])*abs(ori[i*Width+j] - ori[(i-1)*Width+j-1]);
++				var_ori += abs(ori[i*Width+j] - ori[(i-1)*Width+j+1]) > 5 ? 1 : abs(ori[i*Width+j]
++				                - ori[(i-1)*Width+j+1])*abs(ori[i*Width+j] - ori[(i-1)*Width+j+1]);
++				var_ori += abs(ori[i*Width+j] - ori[(i+1)*Width+j-1]) > 5 ? 1 : abs(ori[i*Width+j]
++				                - ori[(i+1)*Width+j-1])*abs(ori[i*Width+j] - ori[(i+1)*Width+j-1]);
++				var_ori += abs(ori[i*Width+j] - ori[(i+1)*Width+j-1]) > 5 ? 1 : abs(ori[i*Width+j]
++				                - ori[(i+1)*Width+j-1])*abs(ori[i*Width+j] - ori[(i+1)*Width+j-1]);
++			}
++		}
++    feat[1] = (double)(var_ori)/count1;
++	free(ori);
++}
+ 
+-	sum[0] = oricount[0]+oricount[7];
+-	for(i=1;i<8;i++)
+-	{
+-		sum[i] = oricount[i]+oricount[i-1];
+-	}
++//计算梯度
++static double gradxy(u8*img1,int th)
++{
++	int i,j;
++	int num = 0;
++	double gradx = 0,grady = 0,grad;
++	double sum = 0;
+ 
+-	max1=sum[0];
+-	for(i=0;i<8;i++)
+-	{
+-		if(max1<sum[i])
+-			max1 = sum[i];
+-	}
++	for(i = 2;i < Height-2;i++)
++        for(j = 2;j < Width-2;j++) {
++			if(img1[i*Width+j] > th) {
++			    num ++;
++				gradx = abs(img1[(i+1)*Width+j] - img1[(i-1)*Width+j] + img1[(i+1)*Width+j+1]
++				            - img1[(i-1)*Width+j+1] + img1[(i+1)*Width+j-1] - img1[(i-1)*Width+j-1]);
++				grady = abs(img1[(i+1)*Width+j+1] - img1[(i+1)*Width+j-1] + img1[(i-1)*Width+j+1]
++				            - img1[(i-1)*Width+j-1] + img1[i*Width+j+1] - img1[i*Width+j-1]);
++				grad = sqrt((double)(gradx*gradx+grady*grady));
++				if(grad>100) sum ++;
++			}
++		}
++    sum = sum*100/num;
++	return sum;
++}
+ 
+-	sum[0] = oricount[0]+oricount[7]+oricount[1];
+-	sum[7] = oricount[7]+oricount[6]+oricount[0];
+-	for(i=1;i<7;i++)
+-	{
+-		sum[i] = oricount[i]+oricount[i-1]+oricount[i+1];
+-	}
+-	max2=sum[0];
+-	for(i=0;i<8;i++)
+-	{
+-		if(max2<sum[i])
+-			max2 = sum[i];
+-	}
++static double gradxy1(u8*img1,int th)
++{
++	int i,j;
++	int num1=0,num2=0,num3=0,num4=0;
++	double gradx = 0,grady = 0,grad;
++	double sum1=0,sum2=0,sum3=0,sum4=0;
++	double max;
++	for(i = 2;i < Height/2-2;i++)
++        for(j = 2;j < Width/2-2;j++) {
++			if(img1[i*Width+j] > th) {
++			    num1 ++;
++				gradx = abs(img1[(i+1)*Width+j] - img1[(i-1)*Width+j] + img1[(i+1)*Width+j+1]
++				            - img1[(i-1)*Width+j+1] + img1[(i+1)*Width+j-1] - img1[(i-1)*Width+j-1]);
++				grady = abs(img1[(i+1)*Width+j+1] - img1[(i+1)*Width+j-1] + img1[(i-1)*Width+j+1]
++				            - img1[(i-1)*Width+j-1] + img1[i*Width+j+1] - img1[i*Width+j-1]);
++				grad = sqrt((double)(gradx*gradx+grady*grady));
++				//printf("  %f  ",grad);
++				if(grad>150) sum1 ++;
++			}
++		}
++    for(i = 2;i < Height/2-2;i++)
++        for(j = Width/2-2;j < Width-2;j++) {
++			if(img1[i*Width+j] > th) {
++			    num2 ++;
++				gradx = abs(img1[(i+1)*Width+j] - img1[(i-1)*Width+j] + img1[(i+1)*Width+j+1]
++				            - img1[(i-1)*Width+j+1] + img1[(i+1)*Width+j-1] - img1[(i-1)*Width+j-1]);
++				grady = abs(img1[(i+1)*Width+j+1] - img1[(i+1)*Width+j-1] + img1[(i-1)*Width+j+1]
++				            - img1[(i-1)*Width+j-1] + img1[i*Width+j+1] - img1[i*Width+j-1]);
++				grad = sqrt((double)(gradx*gradx+grady*grady));
++				//printf("  %f  ",grad);
++				if(grad>150) sum2 ++;
++			}
++		}
++	for(i = Height/2+2;i < Height-2;i++)
++        for(j = 2;j < Width/2-2;j++) {
++			if(img1[i*Width+j] > th) {
++			    num3 ++;
++				gradx = abs(img1[(i+1)*Width+j] - img1[(i-1)*Width+j] + img1[(i+1)*Width+j+1]
++				            - img1[(i-1)*Width+j+1] + img1[(i+1)*Width+j-1] - img1[(i-1)*Width+j-1]);
++				grady = abs(img1[(i+1)*Width+j+1] - img1[(i+1)*Width+j-1] + img1[(i-1)*Width+j+1]
++				            - img1[(i-1)*Width+j-1] + img1[i*Width+j+1] - img1[i*Width+j-1]);
++				grad = sqrt((double)(gradx*gradx+grady*grady));
++				//printf("  %f  ",grad);
++				if(grad>150) sum3 ++;
++			}
++		}
++	for(i = Height/2+2;i < Height-2;i++)
++        for(j = Width/2+2;j < Width-2;j++) {
++			if(img1[i*Width+j] > th) {
++			    num4 ++;
++				gradx = abs(img1[(i+1)*Width+j] - img1[(i-1)*Width+j] + img1[(i+1)*Width+j+1]
++				            - img1[(i-1)*Width+j+1] + img1[(i+1)*Width+j-1] - img1[(i-1)*Width+j-1]);
++				grady = abs(img1[(i+1)*Width+j+1] - img1[(i+1)*Width+j-1] + img1[(i-1)*Width+j+1]
++				            - img1[(i-1)*Width+j-1] + img1[i*Width+j+1] - img1[i*Width+j-1]);
++				grad = sqrt((double)(gradx*gradx+grady*grady));
++				//printf("  %f  ",grad);
++				if(grad>150) sum4 ++;
++			}
++		}
+ 
+-	//printf("  %f %f ",(double)(max1)/count,(double)(max2)/count);
++    if(num1>0) sum1 = sum1*100/num1;
++	else sum1=0;
++	if(num2>0) sum2 = sum2*100/num2;
++	else sum2=0;
++	if(num3>0) sum3 = sum3*100/num3;
++	else sum3=0;
++	if(num4>0) sum4 = sum4*100/num4;
++	else sum4=0;
++	
++	max=sum1;
++	if(max<sum2) max = sum2;
++	if(max<sum3) max = sum3;
++	if(max<sum4) max = sum4;
+ 
+-	return (double)(max2)/count;
++	return max;
+ }
+ 
+ /* 描述：区分手指和非手指按压
+  * 输入：去完背景后的8位图像
+- * return： 0~100手指返回其覆盖率   101 湿手指（部分脏污）  102 非手指，水，脏污   103 掌纹
+- *         -1 内存分配失败
++ * return： 0~100手指返回其覆盖率   101 部分脏污   102 非手指，脏污
+  */
+-int fp88_finger_detect(u8 *imgIn, u8 *imgTmp)
++int fp88_finger_detect(unsigned char *img1)
+ {
+-	int i, j, num = 0, ret = 0,flag;
++	int i, j, num = 0, ret = 0;
+ 	double per;
+-	double dec,gra,xian,var,ori;
+-	u8* imgSmooth = imgTmp;
+-	u8* imgClahe = imgTmp + WIDTH * HEIGHT;
+-	u8* imgRate = imgTmp + 2 * WIDTH * HEIGHT;
+-	u8* Oritation = imgTmp + 3 * WIDTH * HEIGHT;
+-	double feat[2];
+-
+-	per = press_percent(imgIn,imgRate);
+-	if (per < 10) { //无按压
+-		ret = 102;
+-		goto end;
+-	}
+-
+-    clahe(imgIn,imgRate,imgClahe);
+-	meanSmooth(imgClahe, imgSmooth);
+-	//save_bmp(savePath,imgSmooth, WIDTH, HEIGHT);
+-
+-	gradxy(imgSmooth,imgRate,150,feat);
+-	//printf("  gra = %f var = %f ",feat[0],feat[1]);
++	double feat[5];
++	u8* img2 = (u8*) malloc(Width * Height * sizeof(u8));
++	u8* img3 = (u8*) malloc(Width * Height * sizeof(u8));
++	double dec;
++	double gra;
++	GaussianSmooth(img1, img2, 0.3);
++				    
++	//计算覆盖率，不管是什么
++	for (i = 2; i < Height - 2; i++)
++		for (j = 2; j < Width - 2; j++) {
++			if (img2[i * Width + j] > 20) {
++				num++;
++			}
++		}
++	per = (double) num * 100 / (Width - 4) / (Height - 4);
+ 
+-	if (feat[0] > 40) {
++	if (per < 25) {
+ 		ret = per;
+-		goto end;
++		goto free_mem;
+ 	}
+-	if (feat[0] < 25) {
++	mean_var(img2, feat);
++	if (feat[2] < 80) {
+ 		ret = 102;
+-		goto end;
++		goto free_mem;
+ 	}
+ 
+-	xian = xianxingdu(imgSmooth, imgRate);
+-	//printf("  xian = %f  ",xian);
+-	if(xian == -1)
+-		return -1;
+-
+-	if(feat[0] < 25 && xian < 0.15)
++	clahe(img2, img3);
++	feat[4] = gradxy(img3,150);
++	if(feat[4]>65)
+ 	{
+-		ret = 102;//非手指，水，脏污
+-		goto end;
+-	}
+-
+-	if(xian >= 0.3 || (xian*100+feat[0]) > 65)
+-    {
+ 		ret = per;
+-		goto end;
++		goto free_mem;
+ 	}
+-    if(xian < 0.2)
+-    {
+-	    ret = 103;//掌纹palm
+-		goto end;
+-	}
+-
+-	ori = oritation(imgSmooth,imgRate,per,Oritation);
+-	//printf("  ori = %f  ",ori);
+ 
+-	dec = feat[0] + xian*100 + feat[1]- (ori < 0.65 ? 0.65 : ori)*100;
+-	//printf("  dec = %f  ",dec);
+-
+-	if (dec > 5) {
+-		ret = per;//掌纹palm
++	oritation(img2, per, feat);
++	dec = feat[4] - (feat[3] > 40) * 5 - feat[1] * 2;
++	if (dec < 30) {
++		gra = gradxy1(img2,120);
++		if(gra < 20 || feat[0] < 7 ) //feat[2] > 180 
++		    ret = 102;
++		else 
++			ret = 101;
+ 	}
+-	else ret = 103; //手指
++	else ret = per; //手指
++
++free_mem:
++	free(img2);
++	free(img3);
+ 
+-end:
+ 	return ret;
+ }
+ 
+ /* 指纹图像是否变化
+  * @return 1: 变化， 0: 不变
+  */
+-int fp88_finger_press(unsigned char *img1, unsigned char *img2) {
++int fp88_finger_press(unsigned char *img1,unsigned char *img2) {
+ 	int i, j, var = 0;
+-	const int M = 4;
+-	int count = 0;
+ 
+-	for (i = M; i < HEIGHT - M; i++)
+-		for (j = M; j < WIDTH - M; j++) {
+-			int tmp = img2[i * WIDTH + j] - img1[i * WIDTH + j];
++	for (i = 2; i < Height - 2; i++)
++		for (j = 2; j < Width - 2; j++) {
++			int tmp = img2[i * Width + j] - img1[i * Width + j];
+ 			var +=  tmp> 0 ? tmp: -tmp;
+-			count++;
+ 		}
+-	var /= (WIDTH - 2*M) * (HEIGHT - 2*M);
+ 
+-	//LOGD("ret=%d var=%d count=%d\n", ret, var, count);
++	var /= (Width - 4) * (Height - 4);
+ 
+ 	return var;
+ }
+ 
+-
+-
+diff --git a/fingerprint/service/soft_sensor/sensor88/sensor_wrapper.c b/fingerprint/service/soft_sensor/sensor88/sensor_wrapper.c
+index f5d294b..6ffb07c 100644
+--- a/fingerprint/service/soft_sensor/sensor88/sensor_wrapper.c
++++ b/fingerprint/service/soft_sensor/sensor88/sensor_wrapper.c
+@@ -405,7 +405,7 @@ static int algorithm88_press_detect_texture(void *image, int type) {
+ 	    save_press_bmp(AUTHENTICATE_DETECT, type, image_in);
+ 
+ 		if(g_config.enable_dirty_check && type==AUTHENTICATE_DETECT) { //验证
+-			g88_dirty = fp88_finger_detect(g88_authen_ctx->remove_bkg_img, context_get_read_img_buf());
++			g88_dirty = fp88_finger_detect(g88_authen_ctx->remove_bkg_img);
+ 			if(g88_dirty>100) {
+ 				if(g88_authen_ctx->dirty_num>0) {
+ 					var = fp88_finger_press(g88_authen_ctx->remove_bkg_pre, g88_authen_ctx->remove_bkg_img);
+diff --git a/fingerprint/service/soft_sensor/sensor88/wrapper_v2.c b/fingerprint/service/soft_sensor/sensor88/wrapper_v2.c
+index 901c0d1..efdb3ac 100644
+--- a/fingerprint/service/soft_sensor/sensor88/wrapper_v2.c
++++ b/fingerprint/service/soft_sensor/sensor88/wrapper_v2.c
+@@ -175,7 +175,7 @@ static int algorithm88_enroll(void) {
+     save_enroll_bmp(image);
+ 
+     if (g_config.enable_dirty_check) {
+-        int dirty = fp88_finger_detect(image, context_get_read_img_buf());
++        int dirty = fp88_finger_detect(image);
+         LOGD("dirty=%d press_ratio=%d\n", dirty, g88_press_ratio);
+         if(dirty<80) { //部分按压
+             ret = ERROR_ENROLL_PART_TOUCH;
+diff --git a/fingerprint/service/soft_sensor/sensor96/algorithm/algorithm.h b/fingerprint/service/soft_sensor/sensor96/algorithm/algorithm.h
+index 8f7cee6..791ff0f 100644
+--- a/fingerprint/service/soft_sensor/sensor96/algorithm/algorithm.h
++++ b/fingerprint/service/soft_sensor/sensor96/algorithm/algorithm.h
+@@ -66,7 +66,7 @@ int getNaviResult(int sumH, int sumH1, int sumW, int sumW1, int cntImg);
+ 
+ int fp96_calc_cor(unsigned char *img1, unsigned char *img2);
+ 
+-int fp96_finger_detect(u8 *imgIn, u8 *imgTmp);
++int fp96_finger_detect(u8 *imgIn);
+ int fp96_finger_press(unsigned char *img1,unsigned char *img2);
+ 
+ int fp96_testWet(uint8_t *imgRaw, uint8_t *imgBkg, int offset);
+diff --git a/fingerprint/service/soft_sensor/sensor96/algorithm/finger_detect.c b/fingerprint/service/soft_sensor/sensor96/algorithm/finger_detect.c
+index 8098864..50c5f0b 100644
+--- a/fingerprint/service/soft_sensor/sensor96/algorithm/finger_detect.c
++++ b/fingerprint/service/soft_sensor/sensor96/algorithm/finger_detect.c
+@@ -1,74 +1,93 @@
+ #include <string.h>
+ #include <stdlib.h>
+-#include <math.h>
+-//#include "config.h"
++#include "malib.h"
++#include "config.h"
+ 
+-#define WIDTH 96
+-#define HEIGHT 112
++#define Width 96
++#define Height 112
+ #define TH 60
+-#define GLCM_DIS 4  //灰度共生矩阵的统计距离
++#define GLCM_DIS 3  //灰度共生矩阵的统计距离
+ #define GLCM_CLASS 8 //计算灰度共生矩阵的图像灰度值等级化
+-#define PI 3.141592653
+ typedef unsigned char u8;
+ 
+-static void meanSmooth(u8* imgIn,u8* imgSmooth)
++static void mean_var(u8 *img,double *feat)
+ {
+ 	int i,j;
+-	for(i=0;i<HEIGHT;i++)
+-        for(j=0;j<WIDTH;j++)
++	double mean = 0,var = 0;
++	int count = 0,count2 = 0;
++	for(i = 1;i < Height-1;i++)
++	{
++        for(j = 1;j < Width-1;j++)
+ 		{
+-			if( i < HEIGHT-1 && i > 0 && j < WIDTH-1 && j > 0)
+-				imgSmooth[i*WIDTH+j] = (4*imgIn[i*WIDTH+j] + 2*imgIn[(i-1)*WIDTH+j] + 2*imgIn[(i+1)*WIDTH+j] + 2*imgIn[i*WIDTH+j-1] + 2*imgIn[i*WIDTH+j+1]
+-			+ imgIn[(i-1)*WIDTH+j-1] + imgIn[(i-1)*WIDTH+j+1] + imgIn[(i+1)*WIDTH+j-1] + imgIn[(i+1)*WIDTH+j+1])/16;
+-			else
+-				imgSmooth[i*WIDTH+j] = imgIn[i*WIDTH+j];
++			if(img[i*Width+j] > TH)
++			{
++				mean += img[i*Width+j];
++				count ++;
++			}
++		}
++	}
++	mean /= count;
++	for(i = 1;i < Height-1;i++)
++	{
++        for(j = 1;j < Width-1;j++)
++		{
++			if(img[i*Width+j] > TH)
++			{
++				var += abs(img[i*Width+j]-mean);
++			}
+ 		}
++	}
++
++	var /= count;
++	feat[2] = mean;
++	feat[3] = var;
+ }
+ 
+ //计算覆盖率
+ //输入：去背景后的图像
+ //return：覆盖率 0-100
+-static double press_percent(u8* imgSrc,u8* imgDst)
++double press_percent(u8* parry1)
+ {
+ 	 int i,j,k,m,value;
+ 	 int count=0;
+-	 for(i=0;i<HEIGHT;i++)
+-        for(j=0;j<WIDTH;j++)
+-			if(imgSrc[i*WIDTH+j]>80)
+-				imgDst[i*WIDTH+j] = 255;
++	 u8* parry2 = (u8*)malloc(Width*Height*sizeof(u8));
++	 for(i=0;i<Height;i++)
++        for(j=0;j<Width;j++)
++			if(parry1[i*Width+j]>80)
++				parry2[i*Width+j] = 255;
+ 			else
+-				imgDst[i*WIDTH+j] = 0;
++				parry2[i*Width+j] = 0;
+ 
+-	 for(i=2;i<HEIGHT-2;i++)
+-         for(j=2;j<WIDTH-2;j++)
++	 for(i=2;i<Height-2;i++)
++         for(j=2;j<Width-2;j++)
+ 	     {
+-		     if(imgDst[i*WIDTH+j] == 0)
++		     if(parry2[i*Width+j] == 0)
+ 		     {
+ 	              value = 0;
+-			      unsigned char flag[8] = {0,0,0,0,0,0,0,0};
+-
++			      int flag[8] = {0,0,0,0,0,0,0,0};
++			      //cout<<sizeof(flag)<<endl;
+ 			      for(m=1;m<=10;m++)
+ 			      {
+-			  	      flag[0] = flag[0] || imgDst[(i-m)*WIDTH+j-m] == 255 ;
++			  	      flag[0] = flag[0] || parry2[(i-m)*Width+j-m] == 255 ;
+ 				      if( flag[0] ==1 || i-m < 2 || j-m < 2)
+ 					      break;
+ 			      }
+ 			      for(m=1;m<=10;m++)
+ 			      {
+-				      flag[1] = flag[1] || imgDst[(i+m)*WIDTH+j-m] == 255 ;
+-				      if( flag[1] ==1 || i+m > HEIGHT-2 || j-m < 2)
++				      flag[1] = flag[1] || parry2[(i+m)*Width+j-m] == 255 ;
++				      if( flag[1] ==1 || i+m > Height-2 || j-m < 2)
+ 					      break;
+ 			      }
+ 			      for(m=1;m<=10;m++)
+ 			      {
+-				      flag[2] = flag[2] || imgDst[(i-m)*WIDTH+j+m] == 255 ;
+-				      if( flag[2] ==1 || j+m > WIDTH-2 || i-m < 2)
++				      flag[2] = flag[2] || parry2[(i-m)*Width+j+m] == 255 ;
++				      if( flag[2] ==1 || j+m > Width-2 || i-m < 2)
+ 					      break;
+ 			      }
+ 			      for(m=1;m<=10;m++)
+ 			      {
+-				      flag[3] = flag[3] || imgDst[(i+m)*WIDTH+j+m] == 255 ;
+-				      if( flag[3] ==1 || i+m > HEIGHT-2 || j+m > WIDTH-2)
++				      flag[3] = flag[3] || parry2[(i+m)*Width+j+m] == 255 ;
++				      if( flag[3] ==1 || i+m > Height-2 || j+m > Width-2)
+ 					      break;
+ 			      }
+ 			      //节省时间，前4个都是0，进入下一个循环
+@@ -78,7 +97,7 @@ static double press_percent(u8* imgSrc,u8* imgDst)
+ 
+ 			      for(m=1;m<=10;m++)
+ 			      {
+-				      flag[4] = flag[4] || imgDst[(i)*WIDTH+j-m] == 255 ;
++				      flag[4] = flag[4] || parry2[(i)*Width+j-m] == 255 ;
+ 				      if( flag[4] ==1 || j-m < 2)
+ 					      break;
+ 			      }
+@@ -89,8 +108,8 @@ static double press_percent(u8* imgSrc,u8* imgDst)
+ 
+ 			      for(m=1;m<=10;m++)
+ 			      {
+-				      flag[5] = flag[5] || imgDst[(i)*WIDTH+j+m] == 255 ;
+-				      if( flag[5] ==1 || j+m > WIDTH-2)
++				      flag[5] = flag[5] || parry2[(i)*Width+j+m] == 255 ;
++				      if( flag[5] ==1 || j+m > Width-2)
+ 					      break;
+ 			      }
+ 			      //节省时间，前6个有4个0，进入下一个循环
+@@ -100,7 +119,7 @@ static double press_percent(u8* imgSrc,u8* imgDst)
+ 
+ 			      for(m=1;m<=10;m++)
+ 			      {
+-				      flag[6] = flag[6] || imgDst[(i-m)*WIDTH+j] == 255 ;
++				      flag[6] = flag[6] || parry2[(i-m)*Width+j] == 255 ;
+ 				      if( flag[6] ==1 || i-m < 2)
+ 					      break;
+ 			      }
+@@ -111,317 +130,205 @@ static double press_percent(u8* imgSrc,u8* imgDst)
+ 
+ 			      for(m=1;m<=10;m++)
+ 			      {
+-				      flag[7] = flag[7] || imgDst[(i+m)*WIDTH+j] == 255 ;
+-				      if( flag[7] ==1 || i+m > HEIGHT-2)
++				      flag[7] = flag[7] || parry2[(i+m)*Width+j] == 255 ;
++				      if( flag[7] ==1 || i+m > Height-2)
+ 					      break;
+ 			      }
+ 
+ 			      value = value + flag[7];
+ 			      if( value > 4)
+ 			      {
+-				      imgDst[i*WIDTH+j] = 255;
++				      parry2[i*Width+j] = 255;
+ 					  count++;
+ 			      }
+ 		      }
+ 			 else
+ 				 count++;
+ 	      }
++	 //save_bmp(savePath,parry2, Width, Height);
+ 
+-	 return (double) count * 100 / (WIDTH - 4) / (HEIGHT - 4);
++	 return (double) count * 100 / (Width - 4) / (Height - 4);
+ }
+ 
+-static void clahe(u8* imgSrc,u8 *imgRate,u8* imgDst)
++//图像增强
++static void clahe(u8* parry,u8* parry1)
+ {
+ 	int i, j, k, a;
+ 	int sum = 1;
+-	int grayCount[256] = {0};
+-	int graySmooth[256] = {0};
++	int grayCount[256];
+ 	float s[256];
+ 	float s2[256];
+-	int grayValue,count_max= 0,flag,min=255,max=0;
+-
++	int grayValue;
+ 	for (a = 0; a < 256; a++)
+ 		grayCount[a] = 0;
+-	for (i = 2; i < HEIGHT - 2; i++)
+-		for (j = 2; j < WIDTH - 2; j++) {
+-			grayValue = imgSrc[i * WIDTH + j];
+-			if (imgRate[i*WIDTH+j] > 0) {
++	for (i = 2; i < Height - 2; i++)
++		for (j = 2; j < Width - 2; j++) {
++			grayValue = parry[i * Width + j];
++			if (grayValue > 50) {
+ 				grayCount[grayValue]++;
+ 				sum++;
+ 			}
+ 		}
+-	for(i=10;i<250;i++)
+-	{
+-		graySmooth[i] = (grayCount[i] + grayCount[i-1] + grayCount[i+1])/3;
+-	}
+-	s[0] = 0;
++	s[0] = (float) grayCount[0] / (float) sum;
+ 	//灰度转换
+ 	for (k = 1; k < 256; k++) {
+-		s[k] = s[k - 1] + (float) graySmooth[k] / (float) sum;
++		s[k] = s[k - 1] + (float) grayCount[k] / (float) sum;
+ 	}
+ 	for (i = 0; i < 256; i++) {
+ 		s2[i] = (int) (255 * s[i] + 0.5);
+ 	}
+ 	//写入图像
+-	for (i = 0; i < HEIGHT; i++)
+-		for (j = 0; j < WIDTH; j++) {
+-			if(imgRate[i*WIDTH+j] > 0){
+-			    grayValue = imgSrc[i * WIDTH + j];
+-			    imgDst[i * WIDTH + j] = (u8) s2[grayValue];
+-			}
+-			else
+-				imgDst[i * WIDTH + j] = 0;
++	for (i = 0; i < Height; i++)
++		for (j = 0; j < Width; j++) {
++			int value = parry[i * Width + j];
++			//if(value>50)
++			parry1[i * Width + j] = (u8) s2[value];
++			//else
++			//    parry1[i*Width+j] = 0;
+ 		}
+ }
+ 
+-//计算梯度
+-static void gradxy(u8* imgSrc,u8 *imgRate,int th,double* feat)
++static double* CreatGauss(double sigma, int *pnWidowSize)
+ {
+-	int i,j;
+-	int num = 1;
+-	int num1=1,num2=1,num3=1,num4=1;
+-	double gradx = 0,grady = 0,grad;
+-	double sum1=0,sum2=0,sum3=0,sum4=0;
+-	double sum = 0;
+-	double max,min;
+-
+-	for(i = 2;i < HEIGHT-2;i++)
+-        for(j = 2;j < WIDTH-2;j++) {
+-			if(imgSrc[i*WIDTH+j] > th && imgRate[i*WIDTH+j] > 0 && imgRate[(i-1)*WIDTH+j] > 0 && imgRate[(i+1)*WIDTH+j] > 0
+-				&& imgRate[i*WIDTH+j-1] > 0 && imgRate[i*WIDTH+j+1] > 0) {
+-			    num ++;
+-				gradx = abs(imgSrc[(i+1)*WIDTH+j] - imgSrc[(i-1)*WIDTH+j] + imgSrc[(i+1)*WIDTH+j+1]
+-				            - imgSrc[(i-1)*WIDTH+j+1] + imgSrc[(i+1)*WIDTH+j-1] - imgSrc[(i-1)*WIDTH+j-1]);
+-				grady = abs(imgSrc[(i+1)*WIDTH+j+1] - imgSrc[(i+1)*WIDTH+j-1] + imgSrc[(i-1)*WIDTH+j+1]
+-				            - imgSrc[(i-1)*WIDTH+j-1] + imgSrc[i*WIDTH+j+1] - imgSrc[i*WIDTH+j-1]);
+-				grad = sqrt((double)(gradx*gradx+grady*grady));
+-
+-				if(grad>180) sum ++;
+-				if(i >= 2 && i < HEIGHT/2-2 && j >= 2 && j < WIDTH/2-2)
+-				{
+-					num1++;
+-					if(grad>180) sum1 ++;
+-				}
+-				if(i >= 2 && i < HEIGHT/2-2 && j >= WIDTH/2-2 && j < WIDTH-2)
+-				{
+-					num2++;
+-					if(grad>180) sum2 ++;
+-				}
+-				if(i >= HEIGHT/2+2 && i < HEIGHT-2 && j >= 2 && j < WIDTH/2-2)
+-				{
+-					num3++;
+-					if(grad>180) sum3 ++;
+-				}
+-				if(i >= HEIGHT/2+2 && i < HEIGHT-2 && j >= WIDTH/2-2 && j < WIDTH-2)
+-				{
+-					num4++;
+-					if(grad>180) sum4 ++;
+-				}
+-			}
+-		}
+-    sum = sum*100/num;
+-	if(num1>0) sum1 = sum1*100/num1;
+-	else sum1=0;
+-	if(num2>0) sum2 = sum2*100/num2;
+-	else sum2=0;
+-	if(num3>0) sum3 = sum3*100/num3;
+-	else sum3=0;
+-	if(num4>0) sum4 = sum4*100/num4;
+-	else sum4=0;
++	long i;
++	int nCenter; //数组中心点
++	double dDis; //数组中一点到中心点距离
++	double dValue; //中间变量
++	double dSum;
++
++	dSum = 0;
++	// [-3*sigma,3*sigma] 以内数据，会覆盖绝大部分滤波系数
++	*pnWidowSize = 1 + 2 * ceil(3 * sigma);
++	nCenter = (*pnWidowSize) / 2;
++	double *pdKernel = (double*) malloc(*pnWidowSize * sizeof(double));
++
++	//生成高斯数据
++	for (i = 0; i < (*pnWidowSize); i++) {
++		dDis = i - nCenter;
++		dValue = exp(-(1 / 2) * dDis * dDis / (sigma * sigma))
++				/ (sqrt(2 * 3.1415926) * sigma);
++		pdKernel[i] = dValue;
++		dSum += dValue;
++	}
++	//归一化
++	for (i = 0; i < (*pnWidowSize); i++) pdKernel[i] /= dSum;
+ 
+-	max=sum1;
+-	if(max<sum2) max = sum2;
+-	if(max<sum3) max = sum3;
+-	if(max<sum4) max = sum4;
+-	min=sum1;
+-	if(min>sum2) min = sum2;
+-	if(min>sum3) min = sum3;
+-	if(min>sum4) min = sum4;
+-	//printf(" var = %f ",max-min);
+-	feat[0] = sum;
+-	feat[1] = max-min;
++    return pdKernel;
+ }
+ 
+-/* 计算线性度
+- * @return 成功 >0, 失败  -1
+- */
+-static double xianxingdu(u8* imgSrc,u8* imgRate)
++//用高斯滤波器平滑原图像
++static void GaussianSmooth(u8* pGray, u8* pResult, double sigma)
+ {
+-	int i,j,l,k;
+-	double gradx,grady;
+-	float* sita = (float*)malloc(WIDTH*HEIGHT*sizeof(float));
+-	int PDd1[GLCM_CLASS*GLCM_CLASS] = {0};
+-	int PDd2[GLCM_CLASS*GLCM_CLASS] = {0};
+-	int PDd3[GLCM_CLASS*GLCM_CLASS] = {0};
+-	int PDd4[GLCM_CLASS*GLCM_CLASS] = {0};
+-	int PDd5[GLCM_CLASS*GLCM_CLASS] = {0};
+-	int PDd6[GLCM_CLASS*GLCM_CLASS] = {0};
+-	int PDd7[GLCM_CLASS*GLCM_CLASS] = {0};
+-	int PDd8[GLCM_CLASS*GLCM_CLASS] = {0};
+-
+-	double f[8] = {0,0,0,0,0,0,0,0};
+-	double g[8] = {0,0,0,0,0,0,0,0};
+-	double tempM[8];
+-	double fea1,fea2;
+-
+-	if(sita == NULL) return -1;
+-	for(i = 0;i < HEIGHT;i++)
+-		for(j = 0;j < WIDTH;j++)
+-		{
+-			sita[i*WIDTH+j] = 0;
+-		}
+-
+-	for(i = 1;i < HEIGHT-1;i++)
+-        for(j = 1;j < WIDTH-1;j++)
+-		{
+-			if(imgRate[i*WIDTH+j] > 0)
+-			{
+-				gradx = imgSrc[i*WIDTH+j-1] - imgSrc[i*WIDTH+j+1] //+ img1[(i-2)*WIDTH+j+1] - img1[(i-2)*WIDTH+j-1]// + img1[(i-3)*WIDTH+j+1] - img1[(i-3)*WIDTH+j-1]
+-				+ imgSrc[(i-1)*WIDTH+j-1] - imgSrc[(i-1)*WIDTH+j+1] //+ img1[(i+2)*WIDTH+j+1] - img1[(i+2)*WIDTH+j-1]// + img1[(i+3)*WIDTH+j+1] - img1[(i+3)*WIDTH+j-1]
+-				+ imgSrc[(i+1)*WIDTH+j-1] - imgSrc[(i+1)*WIDTH+j+1];
+-
+-				grady = imgSrc[(i+1)*WIDTH+j] - imgSrc[(i-1)*WIDTH+j] //+ img1[(i+1)*WIDTH+j-2] - img1[(i-1)*WIDTH+j-2]// + img1[(i+1)*WIDTH+j-3] - img1[(i-1)*WIDTH+j-3]
+-				+ imgSrc[(i+1)*WIDTH+j-1] - imgSrc[(i-1)*WIDTH+j-1] //+ img1[(i+1)*WIDTH+j+2] - img1[(i-1)*WIDTH+j+2]// + img1[(i+1)*WIDTH+j+3] - img1[(i-1)*WIDTH+j+3]
+-				+ imgSrc[(i+1)*WIDTH+j+1] - imgSrc[(i-1)*WIDTH+j+1];
+-
+-				sita[i*WIDTH+j] = atan((float)grady/gradx) + PI/2;
+-				//printf("  %f  ",sita[i*WIDTH+j]);
++    long x, y;
++	long i;
++	int nWindowSize; //高斯滤波器长度
++	int nLen; //窗口长度
++	double dDotMul;   //高斯系数与图像数据的点乘
++	double dWeightSum; //产生一维高斯数据
++	double *pdKernel; //一维高斯滤波器
++
++    //滤波系数总和
++    double *pdTemp = (double*)malloc(Width*Height*sizeof(double));
++
++    //产生一维高斯数据
++    //CreatGauss(sigma, &pdKernel, &nWindowSize);
++    pdKernel = CreatGauss(sigma, &nWindowSize);
++
++    nLen = nWindowSize/2;
++    //x方向滤波
++	for (y = 0; y < Height; y++) {
++		for (x = 0; x < Width; x++) {
++			dDotMul = 0;
++			dWeightSum = 0;
++			for (i = (-nLen); i <= nLen; i++) {
++				//判断是否在图像内部
++				if ((i + x) >= 0 && (i + x) < Width) {
++					dDotMul += (double) pGray[y * Width + (i + x)] * pdKernel[nLen + i];
++					dWeightSum += pdKernel[nLen + i];
++				}
+ 			}
++			pdTemp[y * Width + x] = dDotMul / dWeightSum;
+ 		}
+-	for(i=GLCM_DIS+2;i<HEIGHT-GLCM_DIS-2;i++)
+-		for(j=GLCM_DIS+2;j<WIDTH-GLCM_DIS-2;j++)
+-			if(imgRate[i*WIDTH+j] > 0 && imgSrc[i*WIDTH+j] > TH)
+-			{
+-			    for(l=0;l<GLCM_CLASS;l++)
+-				    for(k=0;k<GLCM_CLASS;k++)
+-				    {
+-
+-					    if( imgSrc[(i+GLCM_DIS)*WIDTH+j] > TH && (sita[i*WIDTH+j] >=((l-1)*PI/GLCM_CLASS) && sita[i*WIDTH+j] < ((2*(l-1)+1)*PI/2/GLCM_CLASS) )
+-						    && (sita[(i+GLCM_DIS)*WIDTH+j] >= ((k-1)*PI/GLCM_CLASS) && sita[(i+GLCM_DIS)*WIDTH+j] < (2*(k-1)+1)*PI/2/GLCM_CLASS) )
+-						    PDd1[l*GLCM_CLASS+k] ++ ;
+-
+-					    if( imgSrc[(i-GLCM_DIS)*WIDTH+j] > TH && (sita[i*WIDTH+j] >=((l-1)*PI/GLCM_CLASS) && sita[i*WIDTH+j] < ((2*(l-1)+1)*PI/2/GLCM_CLASS) )
+-						    && (sita[(i-GLCM_DIS)*WIDTH+j] >= ((k-1)*PI/GLCM_CLASS) && sita[(i-GLCM_DIS)*WIDTH+j] < (2*(k-1)+1)*PI/2/GLCM_CLASS) )
+-						    PDd2[l*GLCM_CLASS+k] ++ ;
+-
+-					    if( imgSrc[i*WIDTH+j+GLCM_DIS] > TH && (sita[i*WIDTH+j] >=((l-1)*PI/GLCM_CLASS) && sita[i*WIDTH+j] < ((2*(l-1)+1)*PI/2/GLCM_CLASS) )
+-						    && (sita[i*WIDTH+j+GLCM_DIS] >= ((k-1)*PI/GLCM_CLASS) && sita[i*WIDTH+j+GLCM_DIS] < (2*(k-1)+1)*PI/2/GLCM_CLASS) )
+-					   	    PDd3[l*GLCM_CLASS+k] ++ ;
+-
+-					    if( imgSrc[i*WIDTH+j-GLCM_DIS] > TH &&  (sita[i*WIDTH+j] >=((l-1)*PI/GLCM_CLASS) && sita[i*WIDTH+j] < ((2*(l-1)+1)*PI/2/GLCM_CLASS) )
+-						    && (sita[i*WIDTH+j-GLCM_DIS] >= ((k-1)*PI/GLCM_CLASS) && sita[i*WIDTH+j-GLCM_DIS] < (2*(k-1)+1)*PI/2/GLCM_CLASS) )
+-						    PDd4[l*GLCM_CLASS+k] ++ ;
+-
+-					    if( imgSrc[(i+GLCM_DIS)*WIDTH+j+GLCM_DIS] > TH &&  (sita[i*WIDTH+j] >=((l-1)*PI/GLCM_CLASS) && sita[i*WIDTH+j] < ((2*(l-1)+1)*PI/2/GLCM_CLASS) )
+-						    && (sita[(i+GLCM_DIS)*WIDTH+j+GLCM_DIS] >= ((k-1)*PI/GLCM_CLASS) && sita[(i+GLCM_DIS)*WIDTH+j+GLCM_DIS] < (2*(k-1)+1)*PI/2/GLCM_CLASS) )
+-						    PDd5[l*GLCM_CLASS+k] ++ ;
+-
+-					    if( imgSrc[(i-GLCM_DIS)*WIDTH+j+GLCM_DIS] > TH &&  (sita[i*WIDTH+j] >=((l-1)*PI/GLCM_CLASS) && sita[i*WIDTH+j] < ((2*(l-1)+1)*PI/2/GLCM_CLASS) )
+-						    && (sita[(i-GLCM_DIS)*WIDTH+j+GLCM_DIS] >= ((k-1)*PI/GLCM_CLASS) && sita[(i-GLCM_DIS)*WIDTH+j+GLCM_DIS] < (2*(k-1)+1)*PI/2/GLCM_CLASS) )
+-						    PDd6[l*GLCM_CLASS+k] ++ ;
+-
+-					    if( imgSrc[(i+GLCM_DIS)*WIDTH+j-GLCM_DIS] > TH &&  (sita[i*WIDTH+j] >=((l-1)*PI/GLCM_CLASS) && sita[i*WIDTH+j] < ((2*(l-1)+1)*PI/2/GLCM_CLASS) )
+-						    && (sita[(i+GLCM_DIS)*WIDTH+j-GLCM_DIS] >= ((k-1)*PI/GLCM_CLASS) && sita[(i+GLCM_DIS)*WIDTH+j-GLCM_DIS] < (2*(k-1)+1)*PI/2/GLCM_CLASS) )
+-						    PDd7[l*GLCM_CLASS+k] ++ ;
+-
+-					    if( imgSrc[(i-GLCM_DIS)*WIDTH+j-GLCM_DIS] > TH &&  (sita[i*WIDTH+j] >=((l-1)*PI/GLCM_CLASS) && sita[i*WIDTH+j] < ((2*(l-1)+1)*PI/2/GLCM_CLASS) )
+-						    && (sita[(i-GLCM_DIS)*WIDTH+j-GLCM_DIS] >= ((k-1)*PI/GLCM_CLASS) && sita[(i-GLCM_DIS)*WIDTH+j-GLCM_DIS] < (2*(k-1)+1)*PI/2/GLCM_CLASS) )
+-						    PDd8[l*GLCM_CLASS+k] ++ ;
+-					}
+-				}
+-	 for(i = 0;i < GLCM_CLASS;i++)
+-         for (j = 0;j < GLCM_CLASS;j++)
+-		 {
+-			 f[0] += (double)PDd1[i*GLCM_CLASS+j]*cos((i-j)*2*PI/GLCM_CLASS);
+-			 g[0] += PDd1[i*GLCM_CLASS+j];
+-
+-			 f[1] += (double)PDd2[i*GLCM_CLASS+j]*cos((i-j)*2*PI/GLCM_CLASS);
+-			 g[1] += PDd2[i*GLCM_CLASS+j];
+-
+-			 f[2] += (double)PDd3[i*GLCM_CLASS+j]*cos((i-j)*2*PI/GLCM_CLASS);
+-			 g[2] += PDd3[i*GLCM_CLASS+j];
+-
+-			 f[3] += (double)PDd4[i*GLCM_CLASS+j]*cos((i-j)*2*PI/GLCM_CLASS);
+-			 g[3] += PDd4[i*GLCM_CLASS+j];
+-
+-			 f[4] += (double)PDd5[i*GLCM_CLASS+j]*cos((i-j)*2*PI/GLCM_CLASS);
+-			 g[4] += PDd5[i*GLCM_CLASS+j];
+-
+-			 f[5] += (double)PDd6[i*GLCM_CLASS+j]*cos((i-j)*2*PI/GLCM_CLASS);
+-			 g[5] += PDd6[i*GLCM_CLASS+j];
+-
+-			 f[6] += (double)PDd7[i*GLCM_CLASS+j]*cos((i-j)*2*PI/GLCM_CLASS);
+-			 g[6] += PDd7[i*GLCM_CLASS+j];
+-
+-			 f[7] += (double)PDd8[i*GLCM_CLASS+j]*cos((i-j)*2*PI/GLCM_CLASS);
+-			 g[7] += PDd8[i*GLCM_CLASS+j];
+-		 }
++	}
+ 
+-	tempM[0] = f[0]/g[0];
+-	fea1 = tempM[0];
+-	for(i=1;i<8;i++)
+-	{
+-		tempM[i] = (double)f[i]/g[i];
+-		fea1 += tempM[i];
++    //y方向滤波
++    for(x=0; x<Width;x++)  {
++       for(y=0; y<Height; y++)
++	   {
++          dDotMul = 0;
++		  dWeightSum = 0;
++              for(i=(-nLen);i<=nLen;i++)
++			  {
++                  if((i+y)>=0 && (i+y)< Height)
++				  {
++                      dDotMul += (double)pdTemp[(y+i)*Width+x]*pdKernel[nLen+i];
++					  dWeightSum += pdKernel[nLen+i];
++				  }
++			  }
++          pResult[y*Width+x] = (unsigned char)dDotMul/dWeightSum;
++	   }
+ 	}
+-	fea1 /= 8;
+-	if(sita != NULL)
+-	    free(sita);
+ 
+-	return fea1;
++    free(pdKernel);
++    free(pdTemp);
++	pdKernel = NULL;
++	pdTemp = NULL;
+ }
+ 
+-static double oritation(u8* img1,u8* imgRate,double per,u8* ori)
++//计算方向
++static void oritation(u8*img1,double per,double *feat)
+ {
+-	int i,j,x,y;
++	int i,j;
+ 	double gradx = 0,grady = 0,grad;
+-	int D1,D2,D3,D4,D5,D6,D7,D8,V1,V2,V3,V4,max1,max2,count=0,count1=0,temp;
++	int D1,D2,D3,D4,D5,D6,D7,D8,V1,V2,V3,V4,max1,max2,count=0,count1=0;
++	u8* ori = (u8*)malloc(Width*Height*sizeof(u8));
+ 	unsigned int oricount[9] = {0,0,0,0,0,0,0,0};
+ 	unsigned int sum[8] = {0,0,0,0,0,0,0,0};
+-	double var_ori = 0;
++	int var_ori = 0;
+ 
+-	for(i = 0;i < HEIGHT;i++)
+-		for(j = 0;j < WIDTH;j++)
++	for(i = 0;i < Height;i++)
++		for(j = 0;j < Width;j++)
+ 		{
+-			ori[i*WIDTH+j] = 0;
++			ori[i*Width+j] = 0;
+ 		}
+ 
+-	for(i = 5;i < HEIGHT-5;i++)
+-        for(j = 5;j < WIDTH-5;j++)
++	for(i = 5;i < Height-5;i++)
++        for(j = 5;j < Width-5;j++)
+ 		{
+-			if(imgRate[i*WIDTH+j] > 0)
++			if(img1[i*Width+j] > 60)
+ 			{
+-				D1 = abs(img1[i*WIDTH+j+3]-img1[i*WIDTH+j]) + abs(img1[i*WIDTH+j+2]-img1[i*WIDTH+j])
+-					+ abs(img1[i*WIDTH+j+1]-img1[i*WIDTH+j]) + abs(img1[i*WIDTH+j-1]-img1[i*WIDTH+j])
+-					+ abs(img1[i*WIDTH+j-2]-img1[i*WIDTH+j]) + abs(img1[i*WIDTH+j-3]-img1[i*WIDTH+j]) ;
+-
+-				D2 = abs(img1[(i+2)*WIDTH+j-3]-img1[i*WIDTH+j]) + abs(img1[(i+1)*WIDTH+j-3]-img1[i*WIDTH+j])
+-					+ abs(img1[(i+1)*WIDTH+j-2]-img1[i*WIDTH+j]) + abs(img1[(i-1)*WIDTH+j+2]-img1[i*WIDTH+j])
+-					+ abs(img1[(i-1)*WIDTH+j+3]-img1[i*WIDTH+j]) + abs(img1[(i-2)*WIDTH+j+3]-img1[i*WIDTH+j]) ;
+-
+-				D3 = abs(img1[(i+3)*WIDTH+j-3]-img1[i*WIDTH+j]) + abs(img1[(i+2)*WIDTH+j-2]-img1[i*WIDTH+j])
+-					+ abs(img1[(i+1)*WIDTH+j-1]-img1[i*WIDTH+j]) + abs(img1[(i-1)*WIDTH+j+1]-img1[i*WIDTH+j])
+-					+ abs(img1[(i-2)*WIDTH+j+2]-img1[i*WIDTH+j]) + abs(img1[(i-3)*WIDTH+j+3]-img1[i*WIDTH+j]) ;
+-
+-                D4 = abs(img1[(i+3)*WIDTH+j-2]-img1[i*WIDTH+j]) + abs(img1[(i+3)*WIDTH+j-1]-img1[i*WIDTH+j])
+-					+ abs(img1[(i+2)*WIDTH+j-1]-img1[i*WIDTH+j]) + abs(img1[(i-2)*WIDTH+j+1]-img1[i*WIDTH+j])
+-					+ abs(img1[(i-3)*WIDTH+j+1]-img1[i*WIDTH+j]) + abs(img1[(i-3)*WIDTH+j+2]-img1[i*WIDTH+j]) ;
+-
+-                D5 = abs(img1[(i+3)*WIDTH+j]-img1[i*WIDTH+j]) + abs(img1[(i+2)*WIDTH+j]-img1[i*WIDTH+j])
+-					+ abs(img1[(i+1)*WIDTH+j]-img1[i*WIDTH+j]) + abs(img1[(i-1)*WIDTH+j]-img1[i*WIDTH+j])
+-					+ abs(img1[(i-2)*WIDTH+j]-img1[i*WIDTH+j]) + abs(img1[(i-3)*WIDTH+j]-img1[i*WIDTH+j]);
+-
+-                D6 = abs(img1[(i+3)*WIDTH+j+2]-img1[i*WIDTH+j]) + abs(img1[(i+3)*WIDTH+j+1]-img1[i*WIDTH+j])
+-					+ abs(img1[(i+2)*WIDTH+j+1]-img1[i*WIDTH+j]) + abs(img1[(i-2)*WIDTH+j-1]-img1[i*WIDTH+j])
+-					+ abs(img1[(i-3)*WIDTH+j-1]-img1[i*WIDTH+j]) + abs(img1[(i-3)*WIDTH+j-2]-img1[i*WIDTH+j]) ;
+-
+-                D7 = abs(img1[(i+3)*WIDTH+j+3]-img1[i*WIDTH+j]) + abs(img1[(i+2)*WIDTH+j+2]-img1[i*WIDTH+j])
+-					+ abs(img1[(i+1)*WIDTH+j+1]-img1[i*WIDTH+j]) + abs(img1[(i-1)*WIDTH+j-1]-img1[i*WIDTH+j])
+-					+ abs(img1[(i-2)*WIDTH+j-2]-img1[i*WIDTH+j]) + abs(img1[(i-3)*WIDTH+j-3]-img1[i*WIDTH+j]) ;
+-
+-                D8 = abs(img1[(i+2)*WIDTH+j+3]-img1[i*WIDTH+j]) + abs(img1[(i+1)*WIDTH+j+3]-img1[i*WIDTH+j])
+-					+ abs(img1[(i+1)*WIDTH+j+2]-img1[i*WIDTH+j]) + abs(img1[(i-1)*WIDTH+j-2]-img1[i*WIDTH+j])
+-					+ abs(img1[(i-1)*WIDTH+j-3]-img1[i*WIDTH+j]) + abs(img1[(i-2)*WIDTH+j-3]-img1[i*WIDTH+j]) ;
++				D1 = abs(img1[i*Width+j+4]-img1[i*Width+j]) + abs(img1[i*Width+j+3]-img1[i*Width+j])
++					+ abs(img1[i*Width+j+2]-img1[i*Width+j]) + abs(img1[i*Width+j+1]-img1[i*Width+j])
++				    + abs(img1[i*Width+j-1]-img1[i*Width+j]) + abs(img1[i*Width+j-2]-img1[i*Width+j])
++					+ abs(img1[i*Width+j-3]-img1[i*Width+j]) + abs(img1[i*Width+j-4]-img1[i*Width+j]) ;
++				D2 = abs(img1[(i+2)*Width+j-4]-img1[i*Width+j]) + abs(img1[(i+2)*Width+j-3]-img1[i*Width+j])
++				    + abs(img1[(i+1)*Width+j-3]-img1[i*Width+j]) + abs(img1[(i+1)*Width+j-2]-img1[i*Width+j])
++				    + abs(img1[(i-1)*Width+j+2]-img1[i*Width+j]) + abs(img1[(i-1)*Width+j+3]-img1[i*Width+j])
++					+ abs(img1[(i-2)*Width+j+3]-img1[i*Width+j]) + abs(img1[(i-2)*Width+j+4]-img1[i*Width+j]);
++				D3 = abs(img1[(i+4)*Width+j-4]-img1[i*Width+j]) + abs(img1[(i+3)*Width+j-3]-img1[i*Width+j])
++				    + abs(img1[(i+2)*Width+j-2]-img1[i*Width+j]) + abs(img1[(i+1)*Width+j-1]-img1[i*Width+j])
++				    + abs(img1[(i-1)*Width+j+1]-img1[i*Width+j]) + abs(img1[(i-2)*Width+j+2]-img1[i*Width+j])
++					+ abs(img1[(i-3)*Width+j+3]-img1[i*Width+j]) + abs(img1[(i-4)*Width+j+4]-img1[i*Width+j]);
++                D4 = abs(img1[(i+4)*Width+j-2]-img1[i*Width+j]) + abs(img1[(i+3)*Width+j-2]-img1[i*Width+j])
++				    + abs(img1[(i+3)*Width+j-1]-img1[i*Width+j]) + abs(img1[(i+2)*Width+j-1]-img1[i*Width+j])
++				    + abs(img1[(i-2)*Width+j+1]-img1[i*Width+j]) + abs(img1[(i-3)*Width+j+1]-img1[i*Width+j])
++					+ abs(img1[(i-3)*Width+j+2]-img1[i*Width+j]) + abs(img1[(i-4)*Width+j+2]-img1[i*Width+j]);
++                D5 = abs(img1[(i+4)*Width+j]-img1[i*Width+j]) + abs(img1[(i+3)*Width+j]-img1[i*Width+j])
++				    + abs(img1[(i+2)*Width+j]-img1[i*Width+j]) + abs(img1[(i+1)*Width+j]-img1[i*Width+j])
++				    + abs(img1[(i-1)*Width+j]-img1[i*Width+j]) + abs(img1[(i-2)*Width+j]-img1[i*Width+j])
++					+ abs(img1[(i-3)*Width+j]-img1[i*Width+j]) + abs(img1[(i-4)*Width+j]-img1[i*Width+j]);
++                D6 = abs(img1[(i+4)*Width+j+2]-img1[i*Width+j]) + abs(img1[(i+3)*Width+j+2]-img1[i*Width+j])
++				    + abs(img1[(i+3)*Width+j+1]-img1[i*Width+j]) + abs(img1[(i+2)*Width+j+1]-img1[i*Width+j])
++				    + abs(img1[(i-2)*Width+j-1]-img1[i*Width+j]) + abs(img1[(i-3)*Width+j-1]-img1[i*Width+j])
++					+ abs(img1[(i-3)*Width+j-2]-img1[i*Width+j]) + abs(img1[(i-4)*Width+j-2]-img1[i*Width+j]);
++                D7 = abs(img1[(i+4)*Width+j+4]-img1[i*Width+j]) + abs(img1[(i+3)*Width+j+3]-img1[i*Width+j])
++				    + abs(img1[(i+2)*Width+j+2]-img1[i*Width+j]) + abs(img1[(i+1)*Width+j+1]-img1[i*Width+j])
++				    + abs(img1[(i-1)*Width+j-1]-img1[i*Width+j]) + abs(img1[(i-2)*Width+j-2]-img1[i*Width+j])
++					+ abs(img1[(i-3)*Width+j-3]-img1[i*Width+j]) + abs(img1[(i-4)*Width+j-4]-img1[i*Width+j]);
++                D8 = abs(img1[(i+2)*Width+j+4]-img1[i*Width+j]) + abs(img1[(i+2)*Width+j+3]-img1[i*Width+j])
++				    + abs(img1[(i+1)*Width+j+3]-img1[i*Width+j]) + abs(img1[(i+1)*Width+j+2]-img1[i*Width+j])
++				    + abs(img1[(i-1)*Width+j-2]-img1[i*Width+j]) + abs(img1[(i-1)*Width+j-3]-img1[i*Width+j])
++					+ abs(img1[(i-2)*Width+j-3]-img1[i*Width+j]) + abs(img1[(i-2)*Width+j-4]-img1[i*Width+j]);
+ 
+                 V1 = abs(D1-D5);
+ 				V2 = abs(D2-D6);
+@@ -430,146 +337,228 @@ static double oritation(u8* img1,u8* imgRate,double per,u8* ori)
+ 
+ 				max1 = V1;
+ 				if (D1 > D5) {
+-					ori[i * WIDTH + j] = 5;
++					ori[i * Width + j] = 5;
+ 				} else {
+-					ori[i * WIDTH + j] = 1;
++					ori[i * Width + j] = 1;
+ 				}
+ 				if (max1 < V2) {
+ 					max1 = V2;
+ 					if (D2 > D6) {
+-						ori[i * WIDTH + j] = 6;
++						ori[i * Width + j] = 6;
+ 					} else {
+-						ori[i * WIDTH + j] = 2;
++						ori[i * Width + j] = 2;
+ 					}
+ 				}
+ 				if (max1 < V3) {
+ 					max1 = V3;
+ 					if (D3 > D7) {
+-						ori[i * WIDTH + j] = 7;
++						ori[i * Width + j] = 7;
+ 					} else {
+-						ori[i * WIDTH + j] = 3;
++						ori[i * Width + j] = 3;
+ 					}
+ 				}
+ 				if (max1 < V4) {
+ 					max1 = V4;
+ 					if (D4 > D8) {
+-						ori[i * WIDTH + j] = 8;
++						ori[i * Width + j] = 8;
+ 					} else {
+-						ori[i * WIDTH + j] = 4;
++						ori[i * Width + j] = 4;
+ 					}
+ 				}
+ 				//printf(" %d ",max1);
+-				if(img1[i*WIDTH+j] > 150)
++				if(max1>250 && img1[i*Width+j] > 120)
+ 				{
+ 					count++;
+-					oricount[ori[i*WIDTH+j]-1]++;
+ 				}
+ 			}
+ 		}
++    feat[0] = (double)count/per;
+ 
+-	sum[0] = oricount[0]+oricount[7];
+-	for(i=1;i<8;i++)
+-	{
+-		sum[i] = oricount[i]+oricount[i-1];
+-	}
++	for(i = 6;i < Height-6;i++)
++        for(j = 6;j < Width-6;j++)
++		{
++			if(ori[i*Width+j] > 0 && ori[i*Width+j-1] > 0 && ori[i*Width+j+1] > 0
++					&& ori[(i-1)*Width+j] > 0 && ori[(i+1)*Width+j] > 0
++				    && ori[(i-1)*Width+j-1] > 0 && ori[(i-1)*Width+j+1]
++				    && ori[(i+1)*Width+j-1] && ori[(i+1)*Width+j-1]) {
++
++				count1 ++;
++				var_ori += abs(ori[i*Width+j] - ori[i*Width+j-1]) > 5 ? 1 : abs(ori[i*Width+j]
++				                - ori[i*Width+j-1])*abs(ori[i*Width+j] - ori[i*Width+j-1]);
++				var_ori += abs(ori[i*Width+j] - ori[i*Width+j+1]) > 5 ? 1 : abs(ori[i*Width+j]
++				                - ori[i*Width+j+1])*abs(ori[i*Width+j] - ori[i*Width+j+1]);
++		        var_ori += abs(ori[i*Width+j] - ori[(i-1)*Width+j]) > 5 ? 1 : abs(ori[i*Width+j]
++		                        - ori[(i-1)*Width+j])*abs(ori[i*Width+j] - ori[(i-1)*Width+j]);
++				var_ori += abs(ori[i*Width+j] - ori[(i+1)*Width+j]) > 5 ? 1 : abs(ori[i*Width+j]
++				                - ori[(i+1)*Width+j])*abs(ori[i*Width+j] - ori[(i+1)*Width+j]);
++				var_ori += abs(ori[i*Width+j] - ori[(i-1)*Width+j-1]) > 5 ? 1 : abs(ori[i*Width+j]
++				                - ori[(i-1)*Width+j-1])*abs(ori[i*Width+j] - ori[(i-1)*Width+j-1]);
++				var_ori += abs(ori[i*Width+j] - ori[(i-1)*Width+j+1]) > 5 ? 1 : abs(ori[i*Width+j]
++				                - ori[(i-1)*Width+j+1])*abs(ori[i*Width+j] - ori[(i-1)*Width+j+1]);
++				var_ori += abs(ori[i*Width+j] - ori[(i+1)*Width+j-1]) > 5 ? 1 : abs(ori[i*Width+j]
++				                - ori[(i+1)*Width+j-1])*abs(ori[i*Width+j] - ori[(i+1)*Width+j-1]);
++				var_ori += abs(ori[i*Width+j] - ori[(i+1)*Width+j-1]) > 5 ? 1 : abs(ori[i*Width+j]
++				                - ori[(i+1)*Width+j-1])*abs(ori[i*Width+j] - ori[(i+1)*Width+j-1]);
++			}
++		}
++    feat[1] = (double)(var_ori)/count1;
++	free(ori);
++}
+ 
+-	max1=sum[0];
+-	for(i=0;i<8;i++)
+-	{
+-		if(max1<sum[i])
+-			max1 = sum[i];
+-	}
++//计算梯度
++static double gradxy(u8*img1,int th)
++{
++	int i,j;
++	int num = 0;
++	double gradx = 0,grady = 0,grad;
++	double sum = 0;
+ 
+-	sum[0] = oricount[0]+oricount[7]+oricount[1];
+-	sum[7] = oricount[7]+oricount[6]+oricount[0];
+-	for(i=1;i<7;i++)
+-	{
+-		sum[i] = oricount[i]+oricount[i-1]+oricount[i+1];
+-	}
+-	max2=sum[0];
+-	for(i=0;i<8;i++)
+-	{
+-		if(max2<sum[i])
+-			max2 = sum[i];
+-	}
++	for(i = 2;i < Height-2;i++)
++        for(j = 2;j < Width-2;j++) {
++			if(img1[i*Width+j] > th) {
++			    num ++;
++				gradx = abs(img1[(i+1)*Width+j] - img1[(i-1)*Width+j] + img1[(i+1)*Width+j+1]
++				            - img1[(i-1)*Width+j+1] + img1[(i+1)*Width+j-1] - img1[(i-1)*Width+j-1]);
++				grady = abs(img1[(i+1)*Width+j+1] - img1[(i+1)*Width+j-1] + img1[(i-1)*Width+j+1]
++				            - img1[(i-1)*Width+j-1] + img1[i*Width+j+1] - img1[i*Width+j-1]);
++				grad = sqrt((double)(gradx*gradx+grady*grady));
++				if(grad>100) sum ++;
++			}
++		}
++    sum = sum*100/num;
++	return sum;
++}
++
++static double gradxy1(u8*img1,int th)
++{
++	int i,j;
++	int num1=0,num2=0,num3=0,num4=0;
++	double gradx = 0,grady = 0,grad;
++	double sum1=0,sum2=0,sum3=0,sum4=0;
++	double max;
++	for(i = 2;i < Height/2-2;i++)
++        for(j = 2;j < Width/2-2;j++) {
++			if(img1[i*Width+j] > th) {
++			    num1 ++;
++				gradx = abs(img1[(i+1)*Width+j] - img1[(i-1)*Width+j] + img1[(i+1)*Width+j+1]
++				            - img1[(i-1)*Width+j+1] + img1[(i+1)*Width+j-1] - img1[(i-1)*Width+j-1]);
++				grady = abs(img1[(i+1)*Width+j+1] - img1[(i+1)*Width+j-1] + img1[(i-1)*Width+j+1]
++				            - img1[(i-1)*Width+j-1] + img1[i*Width+j+1] - img1[i*Width+j-1]);
++				grad = sqrt((double)(gradx*gradx+grady*grady));
++				if(grad>150) sum1 ++;
++			}
++		}
++    for(i = 2;i < Height/2-2;i++)
++        for(j = Width/2-2;j < Width-2;j++) {
++			if(img1[i*Width+j] > th) {
++			    num2 ++;
++				gradx = abs(img1[(i+1)*Width+j] - img1[(i-1)*Width+j] + img1[(i+1)*Width+j+1]
++				            - img1[(i-1)*Width+j+1] + img1[(i+1)*Width+j-1] - img1[(i-1)*Width+j-1]);
++				grady = abs(img1[(i+1)*Width+j+1] - img1[(i+1)*Width+j-1] + img1[(i-1)*Width+j+1]
++				            - img1[(i-1)*Width+j-1] + img1[i*Width+j+1] - img1[i*Width+j-1]);
++				grad = sqrt((double)(gradx*gradx+grady*grady));
++				if(grad>150) sum2 ++;
++			}
++		}
++	for(i = Height/2+2;i < Height-2;i++)
++        for(j = 2;j < Width/2-2;j++) {
++			if(img1[i*Width+j] > th) {
++			    num3 ++;
++				gradx = abs(img1[(i+1)*Width+j] - img1[(i-1)*Width+j] + img1[(i+1)*Width+j+1]
++				            - img1[(i-1)*Width+j+1] + img1[(i+1)*Width+j-1] - img1[(i-1)*Width+j-1]);
++				grady = abs(img1[(i+1)*Width+j+1] - img1[(i+1)*Width+j-1] + img1[(i-1)*Width+j+1]
++				            - img1[(i-1)*Width+j-1] + img1[i*Width+j+1] - img1[i*Width+j-1]);
++				grad = sqrt((double)(gradx*gradx+grady*grady));
++				if(grad>150) sum3 ++;
++			}
++		}
++	for(i = Height/2+2;i < Height-2;i++)
++        for(j = Width/2+2;j < Width-2;j++) {
++			if(img1[i*Width+j] > th) {
++			    num4 ++;
++				gradx = abs(img1[(i+1)*Width+j] - img1[(i-1)*Width+j] + img1[(i+1)*Width+j+1]
++				            - img1[(i-1)*Width+j+1] + img1[(i+1)*Width+j-1] - img1[(i-1)*Width+j-1]);
++				grady = abs(img1[(i+1)*Width+j+1] - img1[(i+1)*Width+j-1] + img1[(i-1)*Width+j+1]
++				            - img1[(i-1)*Width+j-1] + img1[i*Width+j+1] - img1[i*Width+j-1]);
++				grad = sqrt((double)(gradx*gradx+grady*grady));
++				if(grad>150) sum4 ++;
++			}
++		}
++
++    if(num1>0) sum1 = sum1*100/num1;
++	else sum1=0;
++	if(num2>0) sum2 = sum2*100/num2;
++	else sum2=0;
++	if(num3>0) sum3 = sum3*100/num3;
++	else sum3=0;
++	if(num4>0) sum4 = sum4*100/num4;
++	else sum4=0;
+ 
+-	//printf("  %f %f ",(double)(max1)/count,(double)(max2)/count);
++	max=sum1;
++	if(max<sum2) max = sum2;
++	if(max<sum3) max = sum3;
++	if(max<sum4) max = sum4;
+ 
+-	return (double)(max2)/count;
++	return max;
+ }
+ 
+ /* 描述：区分手指和非手指按压
+  * 输入：去完背景后的8位图像
+- * return： 0~100手指返回其覆盖率   101 湿手指（部分脏污）  102 非手指，水，脏污   103 掌纹
+- *         -1 内存分配失败
++ * return： 0~100手指返回其覆盖率   101 部分脏污   102 非手指，脏污
+  */
+-int fp96_finger_detect(u8 *imgIn, u8 *imgTmp)
++int fp96_finger_detect(unsigned char *img1)
+ {
+-	int i, j, num = 0, ret = 0,flag;
++	int i, j, num = 0, ret = 0;
+ 	double per;
+-	double dec,gra,xian,var,ori;
+-	u8* imgSmooth = imgTmp;
+-	u8* imgClahe = imgTmp + WIDTH * HEIGHT;
+-	u8* imgRate = imgTmp + 2 * WIDTH * HEIGHT;
+-	u8* Oritation = imgTmp + 3 * WIDTH * HEIGHT;
+-	double feat[2];
+-
+-	per = press_percent(imgIn,imgRate);
++	double feat[5];
++	u8* img2 = (u8*) malloc(Width * Height * sizeof(u8));
++	u8* img3 = (u8*) malloc(Width * Height * sizeof(u8));
++	double dec;
++	double gra;
++	GaussianSmooth(img1, img2, 0.3);
++
++	//计算覆盖率，不管是什么
++	//for (i = 2; i < Height - 2; i++)
++	//	for (j = 2; j < Width - 2; j++) {
++	//		if (img2[i * Width + j] > TH) {
++	//			num++;
++	//		}
++	//	}
++	//per = (double) num * 100 / (Width - 4) / (Height - 4);
++	per = press_percent(img2);
++
+ 	if (per < 10) { //无按压
+ 		ret = 102;
+-		goto end;
++		goto free_mem;
+ 	}
+-
+-    clahe(imgIn,imgRate,imgClahe);
+-	meanSmooth(imgClahe, imgSmooth);
+-	//save_bmp(savePath,imgSmooth, WIDTH, HEIGHT);
+-
+-	gradxy(imgSmooth,imgRate,150,feat);
+-	//printf("  gra = %f var = %f ",feat[0],feat[1]);
+-
+-	if (feat[0] > 40) {
+-		ret = per;
+-		goto end;
+-	}
+-	if (feat[0] < 25) {
++	mean_var(img2, feat);
++	if (feat[2] < 80) {
+ 		ret = 102;
+-		goto end;
++		goto free_mem;
+ 	}
+-
+-	xian = xianxingdu(imgSmooth, imgRate);
+-	//printf("  xian = %f  ",xian);
+-	if(xian == -1)
+-		return -1;
+-
+-	if(feat[0] < 25 && xian < 0.15)
++	clahe(img2, img3);
++	feat[4] = gradxy(img3,150);
++	if(feat[4]>65)
+ 	{
+-		ret = 102;//非手指，水，脏污
+-		goto end;
+-	}
+-
+-	if(xian >= 0.3 || (xian*100+feat[0]) > 65)
+-    {
+ 		ret = per;
+-		goto end;
++		goto free_mem;
+ 	}
+-    if(xian < 0.2)
+-    {
+-	    ret = 103;//掌纹palm
+-		goto end;
+-	}
+-
+-	ori = oritation(imgSmooth,imgRate,per,Oritation);
+-	//printf("  ori = %f  ",ori);
+ 
+-	dec = feat[0] + xian*100 + feat[1]- (ori < 0.65 ? 0.65 : ori)*100;
+-	//printf("  dec = %f  ",dec);
+-
+-	if (dec > 5) {
+-		ret = per;//掌纹palm
++	oritation(img2, per, feat);
++	dec = feat[4] - (feat[3] > 40) * 5 - feat[1] * 2;
++	if (dec < 30) {
++		gra = gradxy1(img2,120);
++		if(feat[0] < 7 || feat[0]+gra < 25) //feat[2] > 180
++		    ret = 102;
++		else
++			ret = 101;
+ 	}
+-	else ret = 103; //手指
++	else ret = per; //手指
++
++free_mem:
++	free(img2);
++	free(img3);
+ 
+-end:
+ 	return ret;
+ }
+ 
+@@ -578,16 +567,16 @@ end:
+  */
+ int fp96_finger_press(unsigned char *img1, unsigned char *img2) {
+ 	int i, j, var = 0;
+-	const int M = 4;
++	const int M = 4, W=96, H=112;
+ 	int count = 0;
+ 
+-	for (i = M; i < HEIGHT - M; i++)
+-		for (j = M; j < WIDTH - M; j++) {
+-			int tmp = img2[i * WIDTH + j] - img1[i * WIDTH + j];
++	for (i = M; i < H - M; i++)
++		for (j = M; j < W - M; j++) {
++			int tmp = img2[i * W + j] - img1[i * W + j];
+ 			var +=  tmp> 0 ? tmp: -tmp;
+ 			count++;
+ 		}
+-	var /= (WIDTH - 2*M) * (HEIGHT - 2*M);
++	var /= (W - 2*M) * (H - 2*M);
+ 
+ 	//LOGD("ret=%d var=%d count=%d\n", ret, var, count);
+ 
+diff --git a/fingerprint/service/soft_sensor/sensor96/sensor_wrapper.c b/fingerprint/service/soft_sensor/sensor96/sensor_wrapper.c
+index b4aead7..c385ef3 100644
+--- a/fingerprint/service/soft_sensor/sensor96/sensor_wrapper.c
++++ b/fingerprint/service/soft_sensor/sensor96/sensor_wrapper.c
+@@ -372,7 +372,7 @@ static int algorithm96_press_detect_texture(void *image, int type) {
+ 		save_press_bmp(AUTHENTICATE_DETECT, type, image_in);
+ 
+         if(g_config.enable_dirty_check && type==AUTHENTICATE_DETECT ) {
+-			g96_dirty = fp96_finger_detect(g96_authen_ctx->remove_bkg_img, context_get_read_img_buf());
++			g96_dirty = fp96_finger_detect(g96_authen_ctx->remove_bkg_img);
+ 			if(g96_dirty>100) {
+ 				if(g96_authen_ctx->dirty_num>0) {
+ 					var = fp96_finger_press(g96_authen_ctx->remove_bkg_pre, g96_authen_ctx->remove_bkg_img);
+diff --git a/fingerprint/service/soft_sensor/sensor96/wrapper_v2.c b/fingerprint/service/soft_sensor/sensor96/wrapper_v2.c
+index c5f4732..317f13e 100644
+--- a/fingerprint/service/soft_sensor/sensor96/wrapper_v2.c
++++ b/fingerprint/service/soft_sensor/sensor96/wrapper_v2.c
+@@ -161,7 +161,7 @@ static int algorithm96_enroll(void) {
+     save_enroll_bmp(image);
+ 
+     if (g_config.enable_dirty_check) {
+-        int dirty = fp96_finger_detect(image, context_get_read_img_buf());
++        int dirty = fp96_finger_detect(image);
+         LOGD("finger_detect dirty=%d press_ratio=%d\n", dirty, g96_press_ratio);
+         if(dirty<80) {
+             ret = ERROR_ENROLL_PART_TOUCH;
+diff --git a/version/product.csv b/version/product.csv
+index 18af8d2..e6d57cc 100644
+--- a/version/product.csv
++++ b/version/product.csv
+@@ -20,5 +20,8 @@ A156,Yude,A121_N,Trustonic,armeabi arm64-v8a,Android6.0,Yes,Yes,Yes,No,14,3
+ Z285,Yude,A121_N,Trustkernel,arm64-v8a,Android6.0,Yes,Yes,Yes,Yes,14,3
+ F620,XINGFEI,A83_T,Android,arm64-v8a,Android6.0,Yes,Yes,Yes,No,14,3
+ Android,Hct,A120_N,Trustkernel,arm64-v8a armeabi,Android6.0,Yes,Yes,Yes,No,14,3
+-DOGE_A63,Kusai,A83_N,Android,arm64-v8a,Android6.0,Yes,Yes,Yes,No,14,3
++DOGE_A63,Kusai,A64_N&A88_N&A96_N,Android,arm64-v8a armeabi,Android6.0,Yes,Yes,Yes,No,14,3
++DOGE_A63,Kusai,A64_N&A88_N&A96_N,Trustkernel,arm64-v8a armeabi,Android6.0,Yes,Yes,Yes,No,14,3
++DOGE_A63,Kusai,A120_N&A121_N,Trustkernel,arm64-v8a armeabi,Android6.0,Yes,Yes,Yes,No,14,3
++DOGE_A63,Kusai,A120_N&A121_N,Android,arm64-v8a armeabi,Android6.0,Yes,Yes,Yes,No,14,3
+ isharkL2,ZhanXun,A83_N,Watchtrust,x86_64,Android6.0,Yes,Yes,Yes,No,12,3

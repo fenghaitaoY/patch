@@ -1,0 +1,50 @@
+diff --git a/fingerprint/client/libfprint/include/globalvar.h b/fingerprint/client/libfprint/include/globalvar.h
+index f271c66..b73ad76 100644
+--- a/fingerprint/client/libfprint/include/globalvar.h
++++ b/fingerprint/client/libfprint/include/globalvar.h
+@@ -14,8 +14,8 @@
+ 
+ enum fp_acquired_info {
+ 	// FINGERPRINT_ACQUIRED_VENDOR_BASE = 1000,
+-	FINGERPRINT_ACQUIRED_FINGER_DOWN = FINGERPRINT_ACQUIRED_VENDOR_BASE + 2,
+-	FINGERPRINT_ACQUIRED_FINGER_UP = FINGERPRINT_ACQUIRED_VENDOR_BASE + 3,
++	//FINGERPRINT_ACQUIRED_FINGER_DOWN = FINGERPRINT_ACQUIRED_VENDOR_BASE + 2,
++	//FINGERPRINT_ACQUIRED_FINGER_UP = FINGERPRINT_ACQUIRED_VENDOR_BASE + 3,
+ 
+ #ifdef OEM_CHUANYIN
+ 	FINGERPRINT_ACQUIRED_ALI_BASE = 1000,
+@@ -23,8 +23,8 @@ enum fp_acquired_info {
+ 	FINGERPRINT_ACQUIRED_ALI_BASE = 1100,
+ #endif
+ 	FINGERPRINT_ACQUIRED_WAIT_FINGER_INPUT = FINGERPRINT_ACQUIRED_ALI_BASE + 1,
+-	// FINGERPRINT_ACQUIRED_FINGER_DOWN = FINGERPRINT_ACQUIRED_ALI_BASE + 2,
+-	// FINGERPRINT_ACQUIRED_FINGER_UP = FINGERPRINT_ACQUIRED_ALI_BASE + 3,
++	FINGERPRINT_ACQUIRED_FINGER_DOWN = FINGERPRINT_ACQUIRED_ALI_BASE + 2,
++	FINGERPRINT_ACQUIRED_FINGER_UP = FINGERPRINT_ACQUIRED_ALI_BASE + 3,
+ 	FINGERPRINT_ACQUIRED_INPUT_TOO_LONG = FINGERPRINT_ACQUIRED_ALI_BASE + 4,
+ 	FINGERPRINT_ACQUIRED_DUPLICATE_FINGER = FINGERPRINT_ACQUIRED_ALI_BASE + 5,
+ 	FINGERPRINT_ACQUIRED_DUPLICATE_AREA = FINGERPRINT_ACQUIRED_ALI_BASE + 6,
+diff --git a/fingerprint/client/libfprint/process/navigate.c b/fingerprint/client/libfprint/process/navigate.c
+index c6331b1..e69ceb4 100644
+--- a/fingerprint/client/libfprint/process/navigate.c
++++ b/fingerprint/client/libfprint/process/navigate.c
+@@ -29,15 +29,15 @@ static int report_navi_result(uint32_t navi_result) {
+ 		dc_send_cmd(MA_KEY_DOWN);
+ 		LOGD("report event NAVI DOWN");
+ 	} else if (navi_result & NAVI_TAP_DOWN) {
+-#ifdef PLATFORM_YUNOS
++//#ifdef PLATFORM_YUNOS
+ 		acquired_event_notify(FINGERPRINT_ACQUIRED_FINGER_DOWN);
+-#endif
++//#endif
+ 		dc_send_cmd(TAP_DOWN);
+ 		LOGD("report event TAP DOWN");
+ 	} else if (navi_result & NAVI_TAP_UP) {
+-#ifdef PLATFORM_YUNOS
++//#ifdef PLATFORM_YUNOS
+ 		acquired_event_notify(FINGERPRINT_ACQUIRED_FINGER_UP);
+-#endif
++//#endif
+ 		dc_send_cmd(TAP_UP);
+ 		LOGD("report event TAP UP");
+ 	}

@@ -11,89 +11,70 @@ index 99836de..650f781 100644
  #endif /* __IOCTL_CMD_H__ */
  
 diff --git a/fingerprint/client/libfprint/interface/ca_interface.c b/fingerprint/client/libfprint/interface/ca_interface.c
-index 7550eee..794e211 100644
+index c5b2f9f..9793fca 100644
 --- a/fingerprint/client/libfprint/interface/ca_interface.c
 +++ b/fingerprint/client/libfprint/interface/ca_interface.c
-@@ -5,7 +5,6 @@
- #include <errno.h>
- #include <sys/time.h>
- 
--
- #include "globalvar.h"
- #include "ca_interface.h"
- #include "process/process.h"
-@@ -23,6 +22,7 @@ microarray_properties_t g_config;
+@@ -22,6 +22,7 @@ microarray_properties_t g_config;
  bio_status_t g_bio_status = {0};
  bio_context_t g_bio_context = {0};
- 
+ int g_work_enroll = 0;
 +void set_version_info_to_driver();
  
  /*hal层的准备工作
   * @return 0:success
-@@ -67,6 +67,7 @@ int bio_init(void)
-         ma_tac_deinit();
-         return -1;
-     }
-+ 
- 
-     LOGD("enable fingerprint irq");
-     dc_send_cmd(ENABLE_IRQ);
-@@ -79,6 +80,9 @@ int bio_init(void)
+@@ -78,6 +79,7 @@ int bio_init(void)
          LOGE("tac init error, ret=%d", ret);
          return ret;
      }
-+
 +    set_version_info_to_driver();
-+    
      start_process();
      start_process_extern_msg();
      LOGD("setting default active group.");
-@@ -91,7 +95,7 @@ int bio_init(void)
+@@ -89,8 +91,7 @@ int bio_init(void)
+ 
      ma_tac_get_energy();//get bkg for factory test get image.
  
-     refresh_timer(g_config.is_sensor_changed);
 -#if (defined(PRODUCT_E2_OVERSEA) && defined(OEM_KONKA)) || (defined(PRODUCT_DOGE_A163) && defined(OEM_KUSAI))
-+#if (defined(PRODUCT_E2_OVERSEA) && defined(OEM_KONKA)) || (defined(PRODUCT_DOGE_A63) && defined(OEM_KUSAI))
+-    || (defined(A88))
++#if (defined(PRODUCT_E2_OVERSEA) && defined(OEM_KONKA)) || (defined(PRODUCT_DOGE_A63) && defined(OEM_KUSAI)) || (defined(A88))
      start_screen_status_process();
  #endif
  
-@@ -103,8 +107,30 @@ int bio_init(void)
+@@ -104,6 +105,29 @@ int bio_init(void)
      return SUCCESS;
  }
  
 +void set_version_info_to_driver()
 +{
-+   char version_info[64];
++    char version_info[64];
 +
-+   memset(&version_info, 0, sizeof(version_info));
-+   version_info[0] = 1;
-+   sprintf(&version_info[1], "afs%d", g_bio_context.chip_id);
-+   dc_send_cmd_with_value(HAL_SET_VERSION_INFO, (int*)version_info);
-+   memset(&version_info, 0, sizeof(version_info));
-+   
-+   version_info[0] = 2;
-+   sprintf(&version_info[1], "%s_%s_%s_%s",OEM,SUPPORT_SENSOR,BUILD_VERSION,GIT_SHORT_VERSION); 
-+   dc_send_cmd_with_value(HAL_SET_VERSION_INFO, (int*)version_info);
-+   memset(&version_info, 0, sizeof(version_info));
-+   
-+   version_info[0] = 3;
-+   sprintf(&version_info[1], "Microarray");
-+   dc_send_cmd_with_value(HAL_SET_VERSION_INFO, (int*)version_info);
-+   
-+   version_info[0] = 4;
-+   sprintf(&version_info[1], "%s-%s", COMPILE_USER, COMPILE_DATE);
-+   dc_send_cmd_with_value(HAL_SET_VERSION_INFO, (int*)version_info);
- 
--
++    memset(&version_info, 0, sizeof(version_info));
++    version_info[0] = 1;
++    sprintf(&version_info[1], "afs%d", g_bio_context.chip_id);
++    dc_send_cmd_with_value(HAL_SET_VERSION_INFO, (int*)version_info);
++    memset(&version_info, 0, sizeof(version_info));
++
++    version_info[0] = 2;
++    sprintf(&version_info[1], "%s_%s_%s_%s",OEM,SUPPORT_SENSOR,BUILD_VERSION,GIT_SHORT_VERSION); 
++    dc_send_cmd_with_value(HAL_SET_VERSION_INFO, (int*)version_info);
++    memset(&version_info, 0, sizeof(version_info));
++
++    version_info[0] = 3;
++    sprintf(&version_info[1], "Microarray");
++    dc_send_cmd_with_value(HAL_SET_VERSION_INFO, (int*)version_info);
++
++    version_info[0] = 4;
++    sprintf(&version_info[1], "%s-%s", COMPILE_USER, COMPILE_DATE);
++    dc_send_cmd_with_value(HAL_SET_VERSION_INFO, (int*)version_info);
 +}
  
  
  
 diff --git a/fingerprint/client/libfprint/process/authenticate.c b/fingerprint/client/libfprint/process/authenticate.c
-index 942bc07..8a7ebbc 100644
+index c7b78e5..d75f5f1 100644
 --- a/fingerprint/client/libfprint/process/authenticate.c
 +++ b/fingerprint/client/libfprint/process/authenticate.c
-@@ -105,6 +105,9 @@ static int verify(struct cmd_entry *qe)
+@@ -106,6 +106,9 @@ static int verify(struct cmd_entry *qe)
          }
          if (fid) {
              dc_send_cmd(TIMEOUT_WAKELOCK);
@@ -103,11 +84,20 @@ index 942bc07..8a7ebbc 100644
              authenticate_notify(cmd_auth->gid, fid, &g_bio_context.auth_token);
              gettimeofday(&now,NULL);
  
-diff --git a/fingerprint/client/libfprint/process/enrollcalibrate.c b/fingerprint/client/libfprint/process/enrollcalibrate.c
-index c468f1b..f87391f 100644
---- a/fingerprint/client/libfprint/process/enrollcalibrate.c
-+++ b/fingerprint/client/libfprint/process/enrollcalibrate.c
-@@ -110,7 +110,7 @@ void* enrollcalibrate_work(void * q)
+diff --git a/fingerprint/client/libfprint/process/enroll.c b/fingerprint/client/libfprint/process/enroll.c
+index 1dff91c..4abdd5d 100644
+--- a/fingerprint/client/libfprint/process/enroll.c
++++ b/fingerprint/client/libfprint/process/enroll.c
+@@ -58,7 +58,7 @@ void* enroll_work(void * q)
+             presscount = g_config.enroll_fast_num;
+             LOGD("presscount=%d\n", presscount);
+             while (presscount > 0 && down) {
+-                down = ma_tac_detectTouch_getEnergy();
++                down = ma_tac_detect_touch(PRESS_DETECT);
+                 LOGD("detect touch down2 = %d \n",down);
+                 if ( qe->cancelled) {
+                     LOGD("command cancelled\n");
+@@ -110,7 +110,7 @@ void* enroll_work(void * q)
                      	LOGD("do nothing");
                      } else if (ret == ERROR_EXTRACT_FAIL) {
                          LOGD("image extract fail.");
@@ -115,12 +105,12 @@ index c468f1b..f87391f 100644
 +                        //acquired_event_notify(FINGERPRINT_ACQUIRED_INSUFFICIENT);
                      } else if (ret == ERROR_ENROLL_DUPLICATE_AREA) {
                      	duplicate_area_num++;
-                     	if(duplicate_area_num<6) {
+                     	{
 diff --git a/fingerprint/service/protocol/protocol.c b/fingerprint/service/protocol/protocol.c
-index 86053f4..0e61251 100644
+index bdf773d..d70693d 100644
 --- a/fingerprint/service/protocol/protocol.c
 +++ b/fingerprint/service/protocol/protocol.c
-@@ -156,7 +156,7 @@ static void protocol_detect_touch(protocol_detect_touch_t *data)
+@@ -153,7 +153,7 @@ static void protocol_detect_touch(protocol_detect_touch_t *data)
      int ret=-1;
  	int result = 0;
  
@@ -129,7 +119,7 @@ index 86053f4..0e61251 100644
      LOGD("get_proper ret=%d\n", result);
      if (result == SUCCESS) {
          ret = algorithm_press_detect_texture(g_image_buffer, data->request.type);
-@@ -176,7 +176,7 @@ static void protocol_detect_touch_get_energy(protocol_detect_touch_get_energy_t
+@@ -173,7 +173,7 @@ static void protocol_detect_touch_get_energy(protocol_detect_touch_get_energy_t
  #endif
      int pressret = 0, score = 0, ret = 0;
      static int minscore = 0x7fffffff;
@@ -138,7 +128,7 @@ index 86053f4..0e61251 100644
      if(ret == SUCCESS) {
          score = algorithm_get_energy(g_image_buffer);
          pressret = algorithm_press_detect_texture(g_image_buffer, ENROLL_DETECT);
-@@ -219,7 +219,7 @@ static void protocol_get_image_score(protocol_get_image_score_t *data)
+@@ -216,7 +216,7 @@ static void protocol_get_image_score(protocol_get_image_score_t *data)
  {
      int ret;
  
@@ -148,7 +138,7 @@ index 86053f4..0e61251 100644
          ret = algorithm_get_energy(g_image_buffer);
      }
 diff --git a/fingerprint/service/soft_sensor/include/sensor_adapter.h b/fingerprint/service/soft_sensor/include/sensor_adapter.h
-index 5d3118c..ea36edd 100644
+index 2c57789..05baf88 100644
 --- a/fingerprint/service/soft_sensor/include/sensor_adapter.h
 +++ b/fingerprint/service/soft_sensor/include/sensor_adapter.h
 @@ -42,7 +42,7 @@ typedef struct soft_sensor {
@@ -160,7 +150,7 @@ index 5d3118c..ea36edd 100644
  
      /* reset芯片到正常采图模式
       * @return  SUCCESS:成功
-@@ -245,7 +245,7 @@ int init_adapter_sensor(soft_sensor_t**);
+@@ -247,7 +247,7 @@ int init_adapter_sensor(soft_sensor_t**);
  
  int sensor_create(microarray_properties_t *config);
  int sensor_destory(void);
@@ -170,7 +160,7 @@ index 5d3118c..ea36edd 100644
  int sensor_powerdown_mode(void);
  int sensor_detect_mode(void);
 diff --git a/fingerprint/service/soft_sensor/sensor83/Android.mk b/fingerprint/service/soft_sensor/sensor83/Android.mk
-index 9a24987..cd98cd1 100644
+index 4e13d22..ebb1101 100644
 --- a/fingerprint/service/soft_sensor/sensor83/Android.mk
 +++ b/fingerprint/service/soft_sensor/sensor83/Android.mk
 @@ -9,8 +9,8 @@ LOCAL_SRC_FILES := \
@@ -198,6 +188,19 @@ index 1e3f100..8c784a9 100644
 +int finger_detect(u8 *img1);
  
  #endif /* ALGORITHM_H_ */
+diff --git a/fingerprint/service/soft_sensor/sensor83/algorithm/detect.c b/fingerprint/service/soft_sensor/sensor83/algorithm/detect.c
+index 4e81c62..178d6ae 100644
+--- a/fingerprint/service/soft_sensor/sensor83/algorithm/detect.c
++++ b/fingerprint/service/soft_sensor/sensor83/algorithm/detect.c
+@@ -16,7 +16,7 @@ int fp83_press_detect( int *imgRaw, int *imgBkg, unsigned char grey_offset )
+     int TH, count;
+     int val = ((unsigned int)grey_offset << 4) | 0x0f;
+     count = 0;
+-    TH = 100;
++    TH = 80;
+     for ( j = 4; j < 124; j++ ) {
+         for ( i = 4; i < 76; i++ ) {
+             count += ( ( (imgRaw + j*80)[i] - (imgBkg + j*80)[i] ) > TH ) ? 1 : 0;
 diff --git a/fingerprint/service/soft_sensor/sensor83/algorithm/sensor83_finger_detect.c b/fingerprint/service/soft_sensor/sensor83/algorithm/sensor83_finger_detect.c
 new file mode 100644
 index 0000000..34aa4fb
@@ -793,7 +796,7 @@ index 0000000..34aa4fb
 +		return 0;
 +}
 diff --git a/fingerprint/service/soft_sensor/sensor83/sensor_wrapper.c b/fingerprint/service/soft_sensor/sensor83/sensor_wrapper.c
-index e6a8994..a67b4d8 100644
+index 9d9a068..80ddf7e 100644
 --- a/fingerprint/service/soft_sensor/sensor83/sensor_wrapper.c
 +++ b/fingerprint/service/soft_sensor/sensor83/sensor_wrapper.c
 @@ -267,7 +267,7 @@ static int sensor83_refresh_calibrate_data(void) {
@@ -819,7 +822,7 @@ index e6a8994..a67b4d8 100644
 +    fp83_remove_bkg(image, context_get_sensor83_bkg(),
 +            g83_authen_ctx->remove_bkg_img, g83_enroll_ctx->proc_buf, g_sensor83_grey_offset);
 +    int isfinger= finger_detect(g83_authen_ctx->remove_bkg_img);
-+    LOGD("---------------------------fht---ret = %d,isfinger = %d", ret, isfinger);
++    LOGD("---ret = %d,isfinger = %d", ret, isfinger);
 +    if(ret != SUCCESS && isfinger != 0 && type != AUTHENTICATE_DETECT) {
 +        sensor83_refresh_calibrate_data();
 +        context_set_sensor83_interrupt_calibrated(0);
@@ -829,6 +832,15 @@ index e6a8994..a67b4d8 100644
  
  	LOGD("end, ret = %d.\n", ret);
  
+@@ -423,7 +426,7 @@ static int algorithm83_press_detect_texture(void *image, int type) {
+ 	    ret = (sratio > 25) ? NORMAL_PRESSED : NORMAL_UNPRESSED;
+ 	    break;
+ 	case ENROLL_DETECT:
+-	    ret = (sratio > 90) ? NORMAL_PRESSED : NORMAL_UNPRESSED;
++	    ret = (sratio > 80) ? NORMAL_PRESSED : NORMAL_UNPRESSED;
+ 	    break;
+ 	case PRESS_DETECT:
+ 	    ret = (sratio > 20) ? NORMAL_PRESSED : NORMAL_UNPRESSED;
 @@ -870,7 +873,7 @@ static int sensor83_factory_test_get_image(void *image) {
  	LOGD("start.\n");
  	ret = sensor83_capture_mode();
@@ -838,11 +850,24 @@ index e6a8994..a67b4d8 100644
  		if (ret == SUCCESS) {
  			ret = algorithm83_press_detect_texture(image_in, CAPTURE_DETECT);
  			energy = algorithm83_get_energy(image_in);
+diff --git a/fingerprint/service/soft_sensor/sensor83/wrapper_v2.c b/fingerprint/service/soft_sensor/sensor83/wrapper_v2.c
+index 30739bd..144cce8 100644
+--- a/fingerprint/service/soft_sensor/sensor83/wrapper_v2.c
++++ b/fingerprint/service/soft_sensor/sensor83/wrapper_v2.c
+@@ -189,7 +189,7 @@ static int algorithm83_enroll(void) {
+ 
+     //4 enroll
+     tempID = (int *)g83_ctx2->tmp_tpl;
+-    result = pvm83_enroll(g83_ctx2->tmp_tpl + 8, tempID, g83_enroll_ctx->area, 20);
++    result = pvm83_enroll(g83_ctx2->tmp_tpl + 8, tempID, g83_enroll_ctx->area, 60);
+     if(result==1) {
+          ret = ERROR_ENROLL_DUPLICATE_AREA;
+          goto clear;
 diff --git a/fingerprint/service/soft_sensor/sensor_adapter.c b/fingerprint/service/soft_sensor/sensor_adapter.c
-index d599761..9457737 100644
+index e7a5583..23569ae 100644
 --- a/fingerprint/service/soft_sensor/sensor_adapter.c
 +++ b/fingerprint/service/soft_sensor/sensor_adapter.c
-@@ -133,9 +133,9 @@ int sensor_destory(void)
+@@ -143,9 +143,9 @@ int sensor_destory(void)
      return g_soft_sensor.sensor_destory();
  }
  
@@ -855,7 +880,7 @@ index d599761..9457737 100644
  
  int sensor_reset_mode(void)
 diff --git a/version/product.csv b/version/product.csv
-index 18af8d2..2b46f95 100644
+index 18af8d2..8a0d536 100644
 --- a/version/product.csv
 +++ b/version/product.csv
 @@ -20,5 +20,6 @@ A156,Yude,A121_N,Trustonic,armeabi arm64-v8a,Android6.0,Yes,Yes,Yes,No,14,3
@@ -863,6 +888,6 @@ index 18af8d2..2b46f95 100644
  F620,XINGFEI,A83_T,Android,arm64-v8a,Android6.0,Yes,Yes,Yes,No,14,3
  Android,Hct,A120_N,Trustkernel,arm64-v8a armeabi,Android6.0,Yes,Yes,Yes,No,14,3
 -DOGE_A63,Kusai,A83_N,Android,arm64-v8a,Android6.0,Yes,Yes,Yes,No,14,3
-+DOGE_A63,Kusai,A83_N,Android,arm64-v8a armeabi,Android6.0,Yes,Yes,Yes,No,14,3
++DOGE_A63,Kusai,A83_T,Android,arm64-v8a armeabi,Android8.0,Yes,Yes,Yes,No,14,3
 +DOGE_A63,Kusai,A83_N,Trustkernel,arm64-v8a armeabi,Android6.0,Yes,Yes,Yes,No,14,3
  isharkL2,ZhanXun,A83_N,Watchtrust,x86_64,Android6.0,Yes,Yes,Yes,No,12,3

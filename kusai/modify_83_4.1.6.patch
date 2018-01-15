@@ -11,7 +11,7 @@ index 99836de..650f781 100644
  #endif /* __IOCTL_CMD_H__ */
  
 diff --git a/fingerprint/client/libfprint/interface/ca_interface.c b/fingerprint/client/libfprint/interface/ca_interface.c
-index 7550eee..40865b1 100644
+index 7550eee..a7e79c1 100644
 --- a/fingerprint/client/libfprint/interface/ca_interface.c
 +++ b/fingerprint/client/libfprint/interface/ca_interface.c
 @@ -5,7 +5,6 @@
@@ -72,7 +72,7 @@ index 7550eee..40865b1 100644
 +   memset(&version_info, 0, sizeof(version_info));
 +   
 +   version_info[0] = 2;
-+   sprintf(&version_info[1], "%s",version); 
++   sprintf(&version_info[1], "%s_%s_%s_%s",OEM,SUPPORT_SENSOR,BUILD_VERSION,GIT_SHORT_VERSION);
 +   dc_send_cmd_with_value(HAL_SET_VERSION_INFO, (int*)version_info);
 +   memset(&version_info, 0, sizeof(version_info));
 +   
@@ -117,14 +117,12 @@ index c468f1b..f87391f 100644
                      	duplicate_area_num++;
                      	if(duplicate_area_num<6) {
 diff --git a/version/product.csv b/version/product.csv
-index 18af8d2..2b46f95 100644
+index 58a70d4..4b5a6bb 100644
 --- a/version/product.csv
 +++ b/version/product.csv
-@@ -20,5 +20,6 @@ A156,Yude,A121_N,Trustonic,armeabi arm64-v8a,Android6.0,Yes,Yes,Yes,No,14,3
+@@ -20,4 +20,4 @@ A156,Yude,A121_N,Trustonic,armeabi arm64-v8a,Android6.0,Yes,Yes,Yes,No,14,3
  Z285,Yude,A121_N,Trustkernel,arm64-v8a,Android6.0,Yes,Yes,Yes,Yes,14,3
  F620,XINGFEI,A83_T,Android,arm64-v8a,Android6.0,Yes,Yes,Yes,No,14,3
  Android,Hct,A120_N,Trustkernel,arm64-v8a armeabi,Android6.0,Yes,Yes,Yes,No,14,3
 -DOGE_A63,Kusai,A83_N,Android,arm64-v8a,Android6.0,Yes,Yes,Yes,No,14,3
-+DOGE_A63,Kusai,A83_N,Android,arm64-v8a armeabi,Android6.0,Yes,Yes,Yes,No,14,3
-+DOGE_A63,Kusai,A83_N,Trustkernel,arm64-v8a armeabi,Android6.0,Yes,Yes,Yes,No,14,3
- isharkL2,ZhanXun,A83_N,Watchtrust,x86_64,Android6.0,Yes,Yes,Yes,No,12,3
++DOGE_A63,Kusai,A96_N&A88_N&A64_N,Android,arm64-v8a armeabi,Android6.0,Yes,Yes,Yes,No,14,3

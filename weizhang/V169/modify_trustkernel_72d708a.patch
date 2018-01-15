@@ -1,0 +1,18 @@
+On branch dev
+Your branch is up-to-date with 'origin/dev'.
+
+Changes not staged for commit:
+  (use "git add <file>..." to update what will be committed)
+  (use "git checkout -- <file>..." to discard changes in working directory)
+
+	modified:   fingerprint/service/soft_sensor/sensor88/algorithm/algorithm.h
+	modified:   fingerprint/service/soft_sensor/sensor88/algorithm/finger_detect.c
+	modified:   fingerprint/service/soft_sensor/sensor88/sensor_wrapper.c
+	modified:   fingerprint/service/soft_sensor/sensor88/wrapper_v2.c
+	modified:   fingerprint/service/soft_sensor/sensor96/algorithm/algorithm.h
+	modified:   fingerprint/service/soft_sensor/sensor96/algorithm/finger_detect.c
+	modified:   fingerprint/service/soft_sensor/sensor96/sensor_wrapper.c
+	modified:   fingerprint/service/soft_sensor/sensor96/wrapper_v2.c
+	modified:   version/trustkernel/test.csv
+
+no changes added to commit (use "git add" and/or "git commit -a")
