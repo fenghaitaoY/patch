@@ -1,0 +1,22 @@
+diff --git a/fingerprint/client/libfprint/process/enroll.c b/fingerprint/client/libfprint/process/enroll.c
+index 1dff91c..c4db32d 100644
+--- a/fingerprint/client/libfprint/process/enroll.c
++++ b/fingerprint/client/libfprint/process/enroll.c
+@@ -166,6 +166,7 @@ void* enroll_work(void * q)
+                 	if(down==0) break;
+                 	else if(down==ERROR_FINGER_DIRTY) {
+                 		acquired_event_notify(FINGERPRINT_ACQUIRED_IMAGER_DIRTY);
++                        ma_tac_spi_test();
+                 		usleep(600*1000);
+                 	}
+                     if ( qe->cancelled) {
+diff --git a/version/test.csv b/version/test.csv
+index 6d68c40..f8394bb 100644
+--- a/version/test.csv
++++ b/version/test.csv
+@@ -55,4 +55,4 @@ Default,Android,A83_N,Trusty,armeabi-v7a,Android6.0,Yes,Yes,Yes,No,14,3
+ Default,Android,A64_N,Android,arm64-v8a,Android6.0,Yes,Yes,Yes,No,18,3
+ Default,Android,A72_N,Android,arm64-v8a,Android6.0,Yes,Yes,Yes,No,14,3
+ Default,Android,A48_N,Android,arm64-v8a,Android6.0,Yes,Yes,Yes,No,14,3
+-Default,Android,A96_N&A88_N&A64_N&A48_N,Android,arm64-v8a,Android6.0,Yes,Yes,Yes,No,14,3
++Default,Android,A96_N&A88_N&A64_N,Android,arm64-v8a armeabi,Android6.0,Yes,Yes,Yes,No,14,3

@@ -1,0 +1,40 @@
+diff --git a/fingerprint/service/soft_sensor/sensor88/sensor_88.c b/fingerprint/service/soft_sensor/sensor88/sensor_88.c
+index b6992e3..10dba51 100644
+--- a/fingerprint/service/soft_sensor/sensor88/sensor_88.c
++++ b/fingerprint/service/soft_sensor/sensor88/sensor_88.c
+@@ -204,12 +204,14 @@ static int fp88_detect_mode_parameters(
+ 
+ int fp88_detect_mode(void)
+ {
+-    int n, a;
++    int i,n, a;
+     unsigned char detect_refdrvsel;
+     context_get_sensor88_interrupt_param(&n, &a);
+     context_get_sensor88_detectrefdrvsel(&detect_refdrvsel);
+-    fp88_detect_mode_parameters(s88_main_config, detect_refdrvsel, s88_interrupt_start_line,
+-    		s88_interrupt_line_step, s88_interrupt_framerow, n, a, 0xa0);
++    for(i=0;i<3;i++){
++        fp88_detect_mode_parameters(s88_main_config, detect_refdrvsel, s88_interrupt_start_line,
++                s88_interrupt_line_step, s88_interrupt_framerow, n, a, 0xa0);
++    }
+ 
+     LOGD("n = 0x%x, a = 0x%x\n", n, a);
+     return SUCCESS;
+diff --git a/fingerprint/service/soft_sensor/sensor96/sensor_96.c b/fingerprint/service/soft_sensor/sensor96/sensor_96.c
+index c8741e0..aaf3c82 100644
+--- a/fingerprint/service/soft_sensor/sensor96/sensor_96.c
++++ b/fingerprint/service/soft_sensor/sensor96/sensor_96.c
+@@ -197,9 +197,11 @@ static int fp96_detect_parameters(int chipid, int close_temp, int n, int a, int
+ }
+ 
+ int fp96_detect_mode(int chipid) {
+-    int n = 0, a = 0;
++    int i, n = 0, a = 0;
+     context_get_sensor96_interrupt_param(&n, &a);
+-    fp96_detect_parameters(chipid, 0, n, a, 0xa0);
++    for(i=0;i<3;i++){
++        fp96_detect_parameters(chipid, 0, n, a, 0xa0);
++    }
+     LOGD("n = 0x%x, a = 0x%x\n", n, a);
+     return SUCCESS;
+ }
