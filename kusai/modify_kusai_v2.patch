@@ -1,0 +1,196 @@
+diff --git a/driver/android6.0/ioctl_cmd.h b/driver/android6.0/ioctl_cmd.h
+index 99836de..650f781 100644
+--- a/driver/android6.0/ioctl_cmd.h
++++ b/driver/android6.0/ioctl_cmd.h
+@@ -63,6 +63,7 @@
+ #define MA_POWER_ON             _IO(MA_IOC_MAGIC, 49)
+ #define MA_SID03_REPORT_KEY_ONE        _IO(MA_IOC_MAGIC, 50)
+ #define MA_SID03_REPORT_KEY_TWO        _IO(MA_IOC_MAGIC, 51)
++#define HAL_SET_VERSION_INFO           _IOW(MA_IOC_MAGIC,   52, unsigned int)
+ 
+ #endif /* __IOCTL_CMD_H__ */
+ 
+diff --git a/fingerprint/client/libfprint/interface/ca_interface.c b/fingerprint/client/libfprint/interface/ca_interface.c
+index 7550eee..40865b1 100644
+--- a/fingerprint/client/libfprint/interface/ca_interface.c
++++ b/fingerprint/client/libfprint/interface/ca_interface.c
+@@ -5,7 +5,6 @@
+ #include <errno.h>
+ #include <sys/time.h>
+ 
+-
+ #include "globalvar.h"
+ #include "ca_interface.h"
+ #include "process/process.h"
+@@ -23,6 +22,7 @@ microarray_properties_t g_config;
+ bio_status_t g_bio_status = {0};
+ bio_context_t g_bio_context = {0};
+ 
++void set_version_info_to_driver();
+ 
+ /*hal层的准备工作
+  * @return 0:success
+@@ -67,6 +67,7 @@ int bio_init(void)
+         ma_tac_deinit();
+         return -1;
+     }
++ 
+ 
+     LOGD("enable fingerprint irq");
+     dc_send_cmd(ENABLE_IRQ);
+@@ -79,6 +80,9 @@ int bio_init(void)
+         LOGE("tac init error, ret=%d", ret);
+         return ret;
+     }
++
++    set_version_info_to_driver();
++    
+     start_process();
+     start_process_extern_msg();
+     LOGD("setting default active group.");
+@@ -91,7 +95,7 @@ int bio_init(void)
+     ma_tac_get_energy();//get bkg for factory test get image.
+ 
+     refresh_timer(g_config.is_sensor_changed);
+-#if (defined(PRODUCT_E2_OVERSEA) && defined(OEM_KONKA)) || (defined(PRODUCT_DOGE_A163) && defined(OEM_KUSAI))
++#if (defined(PRODUCT_E2_OVERSEA) && defined(OEM_KONKA)) || (defined(PRODUCT_DOGE_A63) && defined(OEM_KUSAI))
+     start_screen_status_process();
+ #endif
+ 
+@@ -103,8 +107,30 @@ int bio_init(void)
+     return SUCCESS;
+ }
+ 
++void set_version_info_to_driver()
++{
++   char version_info[64];
++
++   memset(&version_info, 0, sizeof(version_info));
++   version_info[0] = 1;
++   sprintf(&version_info[1], "afs%d", g_bio_context.chip_id);
++   dc_send_cmd_with_value(HAL_SET_VERSION_INFO, (int*)version_info);
++   memset(&version_info, 0, sizeof(version_info));
++   
++   version_info[0] = 2;
++   sprintf(&version_info[1], "%s",version); 
++   dc_send_cmd_with_value(HAL_SET_VERSION_INFO, (int*)version_info);
++   memset(&version_info, 0, sizeof(version_info));
++   
++   version_info[0] = 3;
++   sprintf(&version_info[1], "Microarray");
++   dc_send_cmd_with_value(HAL_SET_VERSION_INFO, (int*)version_info);
++   
++   version_info[0] = 4;
++   sprintf(&version_info[1], "%s-%s", COMPILE_USER, COMPILE_DATE);
++   dc_send_cmd_with_value(HAL_SET_VERSION_INFO, (int*)version_info);
+ 
+-
++}
+ 
+ 
+ 
+diff --git a/fingerprint/client/libfprint/process/authenticate.c b/fingerprint/client/libfprint/process/authenticate.c
+index 942bc07..8a7ebbc 100644
+--- a/fingerprint/client/libfprint/process/authenticate.c
++++ b/fingerprint/client/libfprint/process/authenticate.c
+@@ -105,6 +105,9 @@ static int verify(struct cmd_entry *qe)
+         }
+         if (fid) {
+             dc_send_cmd(TIMEOUT_WAKELOCK);
++#if defined(OEM_KUSAI)
++            dc_send_cmd(MA_KEY_F14);
++#endif
+             authenticate_notify(cmd_auth->gid, fid, &g_bio_context.auth_token);
+             gettimeofday(&now,NULL);
+ 
+diff --git a/fingerprint/client/libfprint/process/enrollcalibrate.c b/fingerprint/client/libfprint/process/enrollcalibrate.c
+index c468f1b..f87391f 100644
+--- a/fingerprint/client/libfprint/process/enrollcalibrate.c
++++ b/fingerprint/client/libfprint/process/enrollcalibrate.c
+@@ -110,7 +110,7 @@ void* enrollcalibrate_work(void * q)
+                     	LOGD("do nothing");
+                     } else if (ret == ERROR_EXTRACT_FAIL) {
+                         LOGD("image extract fail.");
+-                        acquired_event_notify(FINGERPRINT_ACQUIRED_INSUFFICIENT);
++                        //acquired_event_notify(FINGERPRINT_ACQUIRED_INSUFFICIENT);
+                     } else if (ret == ERROR_ENROLL_DUPLICATE_AREA) {
+                     	duplicate_area_num++;
+                     	if(duplicate_area_num<6) {
+diff --git a/fingerprint/client/libfprint/tac/microarray_tac.c b/fingerprint/client/libfprint/tac/microarray_tac.c
+index 7c9ded8..ed1849f 100644
+--- a/fingerprint/client/libfprint/tac/microarray_tac.c
++++ b/fingerprint/client/libfprint/tac/microarray_tac.c
+@@ -274,6 +274,8 @@ int ma_tac_do_verify(int *fid_count, uint32_t *fid, int count, hw_auth_token_t *
+ 	time(&tm);
+ 	msg.request.time = tm;
+ 	msg.request.count_down = count;
++    msg.request.cha_h = (hat->challenge) >>32;
++    msg.request.cha_l = hat->challenge;
+ 	memcpy(&(msg.request.hat), hat, sizeof(hw_auth_token_t));
+ 	ma_tac_security_invoke(PROTOCOL_AUTHENTICATE, &msg, sizeof(protocol_authenticate_t));
+ 	if (msg.response.err) {
+diff --git a/fingerprint/include/config.h b/fingerprint/include/config.h
+index 7ecf8c2..d3a82ee 100644
+--- a/fingerprint/include/config.h
++++ b/fingerprint/include/config.h
+@@ -154,13 +154,13 @@ typedef unsigned char imgType;
+ #define DEFAULT_AUTHENTICATE_LEVEL_A83                  4
+ #define DEFAULT_AUTHENTICATE_CHAR_NUM_A83     			2
+ #define DEFAULT_AUTHENTICATE_UPDATE_CHAR_NUM_A83     	3
+-#define DEFAULT_CK_PERIOD_A83                           1
+ #ifdef  PLATFORM_TRUSTY
+ #define TEMPLATE_NUM_A83                                40
+ #else
+ #define TEMPLATE_NUM_A83                                60
+ #endif
+ #endif
++#define DEFAULT_CK_PERIOD_A83                           1
+ 
+ #ifdef A82
+ //#define TEMPLATE_SIZE 2772
+diff --git a/fingerprint/include/protocol.h b/fingerprint/include/protocol.h
+index ef23ac0..db4ade2 100644
+--- a/fingerprint/include/protocol.h
++++ b/fingerprint/include/protocol.h
+@@ -176,6 +176,8 @@ typedef union {
+ 
+ typedef union {
+ 	struct {
++        uint32_t cha_h;
++        uint32_t cha_l;
+ 		int unused;
+ 		int count_down;
+ 		long time;
+diff --git a/fingerprint/service/protocol/protocol.c b/fingerprint/service/protocol/protocol.c
+index 7698535..3dfda2c 100644
+--- a/fingerprint/service/protocol/protocol.c
++++ b/fingerprint/service/protocol/protocol.c
+@@ -72,7 +72,7 @@ static void protocol_service_init(protocol_service_init_t *data)
+     image_size = s_sensor->image_size;
+     sensor_create(&g_config);
+     memcpy(&data->response.config, &g_config, sizeof(microarray_properties_t));
+-    LOGD("alg pvm version = %s", pvm_getVersion());
++    //LOGD("alg pvm version = %s", pvm_getVersion());
+ 
+     data->response.err = 0;
+     is_inited = 1;
+@@ -237,7 +237,7 @@ static void protocol_authenticate(protocol_authenticate_t *data)
+     int ret = 0, fid_count = data->request.count_down;
+     uint32_t fid = 0;
+     uint64_t challenge;
+-    challenge = data->request.hat.challenge;
++    challenge = ((uint64_t)(data->request.cha_h)<<32)|data->request.cha_l;
+     g_service_currTime = data->request.time;
+     memset(data, 0, sizeof(protocol_authenticate_t));
+ #ifdef OEM_CHUANYIN
+diff --git a/version/product.csv b/version/product.csv
+index 58a70d4..6e5cd4e 100644
+--- a/version/product.csv
++++ b/version/product.csv
+@@ -20,4 +20,5 @@ A156,Yude,A121_N,Trustonic,armeabi arm64-v8a,Android6.0,Yes,Yes,Yes,No,14,3
+ Z285,Yude,A121_N,Trustkernel,arm64-v8a,Android6.0,Yes,Yes,Yes,Yes,14,3
+ F620,XINGFEI,A83_T,Android,arm64-v8a,Android6.0,Yes,Yes,Yes,No,14,3
+ Android,Hct,A120_N,Trustkernel,arm64-v8a armeabi,Android6.0,Yes,Yes,Yes,No,14,3
+-DOGE_A63,Kusai,A83_N,Android,arm64-v8a,Android6.0,Yes,Yes,Yes,No,14,3
++DOGE_A63,Kusai,A121_N&A120_N,Android,arm64-v8a armeabi,Android6.0,Yes,Yes,Yes,No,14,3
++DOGE_A63,Kusai,A121_N&A120_N,Trustkernel,arm64-v8a armeabi,Android6.0,Yes,Yes,Yes,No,14,3

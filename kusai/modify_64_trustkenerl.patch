@@ -1,0 +1,331 @@
+diff --git a/buildenv/service/trustkernel/make.sh b/buildenv/service/trustkernel/make.sh
+index cb3ebf0..b4b90c3 100755
+--- a/buildenv/service/trustkernel/make.sh
++++ b/buildenv/service/trustkernel/make.sh
+@@ -13,8 +13,8 @@ gcc_path="$binpath/gcc-linaro-6.1.1-2016.08-i686_arm-linux-gnueabihf/bin/"
+ export TA_KIT=`pwd`/ta_kit
+ export PATH=$PATH:$gcc_path
+ 
+-# make
+-make RELEASE=1 #不验证TA签名
++make
++#make RELEASE=1 #不验证TA签名
+ 
+ [ ! -d ../target/system/app/t6/ ] && mkdir -p ../target/system/app/t6/
+-cp out/edcf9395-3518-9067-614cafae2909775b.ta ../target/system/app/t6/
+\ No newline at end of file
++cp out/edcf9395-3518-9067-614cafae2909775b.ta ../target/system/app/t6/
+diff --git a/driver/android6.0/ioctl_cmd.h b/driver/android6.0/ioctl_cmd.h
+index 99836de..650f781 100644
+--- a/driver/android6.0/ioctl_cmd.h
++++ b/driver/android6.0/ioctl_cmd.h
+@@ -63,6 +63,7 @@
+ #define MA_POWER_ON             _IO(MA_IOC_MAGIC, 49)
+ #define MA_SID03_REPORT_KEY_ONE        _IO(MA_IOC_MAGIC, 50)
+ #define MA_SID03_REPORT_KEY_TWO        _IO(MA_IOC_MAGIC, 51)
++#define HAL_SET_VERSION_INFO           _IOW(MA_IOC_MAGIC,   52, unsigned int)
+ 
+ #endif /* __IOCTL_CMD_H__ */
+ 
+diff --git a/fingerprint/client/libfprint/interface/ca_interface.c b/fingerprint/client/libfprint/interface/ca_interface.c
+index 4dd39c4..143a68e 100644
+--- a/fingerprint/client/libfprint/interface/ca_interface.c
++++ b/fingerprint/client/libfprint/interface/ca_interface.c
+@@ -22,6 +22,7 @@ microarray_properties_t g_config;
+ bio_status_t g_bio_status = {0};
+ bio_context_t g_bio_context = {0};
+ int g_work_enroll = 0;
++void set_version_info_to_driver();
+ 
+ /*hal层的准备工作
+  * @return 0:success
+@@ -78,6 +79,7 @@ int bio_init(void)
+         LOGE("tac init error, ret=%d", ret);
+         return ret;
+     }
++    set_version_info_to_driver();
+     start_process();
+     start_process_extern_msg();
+     LOGD("setting default active group.");
+@@ -89,8 +91,7 @@ int bio_init(void)
+ 
+     ma_tac_get_energy();//get bkg for factory test get image.
+ 
+-#if (defined(PRODUCT_E2_OVERSEA) && defined(OEM_KONKA)) || (defined(PRODUCT_DOGE_A163) && defined(OEM_KUSAI))
+-    || (defined(A88))
++#if (defined(PRODUCT_E2_OVERSEA) && defined(OEM_KONKA)) || (defined(PRODUCT_DOGE_A63) && defined(OEM_KUSAI)) || (defined(A88))
+     start_screen_status_process();
+ #endif
+ 
+@@ -104,6 +105,29 @@ int bio_init(void)
+     return SUCCESS;
+ }
+ 
++void set_version_info_to_driver()
++{
++    char version_info[64];
++
++    memset(&version_info, 0, sizeof(version_info));
++    version_info[0] = 1;
++    sprintf(&version_info[1], "afs%d", g_bio_context.chip_id);
++    dc_send_cmd_with_value(HAL_SET_VERSION_INFO, (int*)version_info);
++    memset(&version_info, 0, sizeof(version_info));
++
++    version_info[0] = 2;
++    sprintf(&version_info[1], "%s_%s_%s_%s",OEM,SUPPORT_SENSOR,BUILD_VERSION,GIT_SHORT_VERSION); 
++    dc_send_cmd_with_value(HAL_SET_VERSION_INFO, (int*)version_info);
++    memset(&version_info, 0, sizeof(version_info));
++
++    version_info[0] = 3;
++    sprintf(&version_info[1], "Microarray");
++    dc_send_cmd_with_value(HAL_SET_VERSION_INFO, (int*)version_info);
++
++    version_info[0] = 4;
++    sprintf(&version_info[1], "%s-%s", COMPILE_USER, COMPILE_DATE);
++    dc_send_cmd_with_value(HAL_SET_VERSION_INFO, (int*)version_info);
++}
+ 
+ 
+ 
+diff --git a/fingerprint/client/libfprint/process/authenticate.c b/fingerprint/client/libfprint/process/authenticate.c
+index 04acf11..af8f457 100644
+--- a/fingerprint/client/libfprint/process/authenticate.c
++++ b/fingerprint/client/libfprint/process/authenticate.c
+@@ -106,6 +106,9 @@ static int verify(struct cmd_entry *qe)
+         }
+         if (fid) {
+             dc_send_cmd(TIMEOUT_WAKELOCK);
++#if defined(OEM_KUSAI)
++            dc_send_cmd(MA_KEY_F14);
++#endif
+             authenticate_notify(cmd_auth->gid, fid, &g_bio_context.auth_token);
+             gettimeofday(&now,NULL);
+ 
+diff --git a/fingerprint/client/libfprint/process/enroll.c b/fingerprint/client/libfprint/process/enroll.c
+index d3a6e8a..dd98563 100644
+--- a/fingerprint/client/libfprint/process/enroll.c
++++ b/fingerprint/client/libfprint/process/enroll.c
+@@ -98,7 +98,7 @@ void* enroll_work(void * q)
+             presscount = g_config.enroll_fast_num;
+             LOGD("presscount=%d\n", presscount);
+             while (presscount > 0 && down) {
+-                down = ma_tac_detectTouch_getEnergy();
++                down = ma_tac_detect_touch(PRESS_DETECT);
+                 LOGD("detect touch down2 = %d \n",down);
+ 
+                 is_timeout = check_timeout(start_time, cmd_enroll->timeout_sec);
+@@ -166,7 +166,7 @@ void* enroll_work(void * q)
+                     	LOGD("do nothing");
+                     } else if (ret == ERROR_EXTRACT_FAIL) {
+                         LOGD("image extract fail.");
+-                        acquired_event_notify(FINGERPRINT_ACQUIRED_INSUFFICIENT);
++                        //acquired_event_notify(FINGERPRINT_ACQUIRED_INSUFFICIENT);
+                     } else if (ret == ERROR_ENROLL_DUPLICATE_AREA) {
+                     	duplicate_area_num++;
+                     	{
+diff --git a/fingerprint/client/libfprint/process/screen_status.c b/fingerprint/client/libfprint/process/screen_status.c
+index 42b827d..4df97cd 100644
+--- a/fingerprint/client/libfprint/process/screen_status.c
++++ b/fingerprint/client/libfprint/process/screen_status.c
+@@ -20,8 +20,8 @@ static void *screen_status_thread(void *p)
+     const int default_ck_period_s_off = DEFAULT_CK_PERIOD_A80;
+     const int default_ck_period_s_on = DEFAULT_CK_PERIOD_A80;
+ #elif defined(PRODUCT_DOGE_A63) && defined(OEM_KUSAI)
+-    const int default_ck_period_s_off = DEFAULT_CK_PERIOD_A83;
+-    const int default_ck_period_s_on = DEFAULT_CK_PERIOD_A83;
++    const int default_ck_period_s_off = 1;
++    const int default_ck_period_s_on = 1;
+ #endif
+ #ifdef A88
+     const int default_ck_period_s_off = DEFAULT_CK_PERIOD_A88;
+diff --git a/fingerprint/service/protocol/protocol.c b/fingerprint/service/protocol/protocol.c
+index a7e922c..131f574 100644
+--- a/fingerprint/service/protocol/protocol.c
++++ b/fingerprint/service/protocol/protocol.c
+@@ -153,7 +153,7 @@ static void protocol_detect_touch(protocol_detect_touch_t *data)
+     int ret=-1;
+ 	int result = 0;
+ 
+-    result = sensor_get_proper_image(g_image_buffer, image_size, 1);
++    result = sensor_get_proper_image(g_image_buffer, image_size, 1, data->request.type);
+     LOGD("get_proper ret=%d\n", result);
+     if (result == SUCCESS) {
+         ret = algorithm_press_detect_texture(g_image_buffer, data->request.type);
+@@ -173,7 +173,7 @@ static void protocol_detect_touch_get_energy(protocol_detect_touch_get_energy_t
+ #endif
+     int pressret = 0, score = 0, ret = 0;
+     static int minscore = 0x7fffffff;
+-    ret = sensor_get_proper_image(g_image_buffer, image_size, 1);
++    ret = sensor_get_proper_image(g_image_buffer, image_size, 1,ENROLL_DETECT);
+     if(ret == SUCCESS) {
+         score = algorithm_get_energy(g_image_buffer);
+         pressret = algorithm_press_detect_texture(g_image_buffer, ENROLL_DETECT);
+@@ -216,7 +216,7 @@ static void protocol_get_image_score(protocol_get_image_score_t *data)
+ {
+     int ret;
+ 
+-    ret = sensor_get_proper_image(g_image_buffer, image_size, 1);
++    ret = sensor_get_proper_image(g_image_buffer, image_size, 1,PRESS_DETECT);
+     if(ret == SUCCESS) {
+         ret = algorithm_get_energy(g_image_buffer);
+     }
+diff --git a/fingerprint/service/soft_sensor/include/sensor_adapter.h b/fingerprint/service/soft_sensor/include/sensor_adapter.h
+index 51784c4..477c41d 100644
+--- a/fingerprint/service/soft_sensor/include/sensor_adapter.h
++++ b/fingerprint/service/soft_sensor/include/sensor_adapter.h
+@@ -42,7 +42,7 @@ typedef struct soft_sensor {
+      * @return  SUCCESS:成功
+      *          FAIL：失败
+      */
+-    int (*sensor_get_proper_image)(void *image, const int len, const int line_step);
++    int (*sensor_get_proper_image)(void *image, const int len, const int line_step, int type);
+ 
+     /* reset芯片到正常采图模式
+      * @return  SUCCESS:成功
+@@ -251,7 +251,7 @@ int init_adapter_sensor(soft_sensor_t**);
+ 
+ int sensor_create(microarray_properties_t *config);
+ int sensor_destory(void);
+-int sensor_get_proper_image(void *image, const int len, const int line_step);
++int sensor_get_proper_image(void *image, const int len, const int line_step, int type);
+ int sensor_reset_mode(void);
+ int sensor_powerdown_mode(void);
+ int sensor_detect_mode(void);
+diff --git a/fingerprint/service/soft_sensor/sensor83/Android.mk b/fingerprint/service/soft_sensor/sensor83/Android.mk
+index 4e13d22..ebb1101 100644
+--- a/fingerprint/service/soft_sensor/sensor83/Android.mk
++++ b/fingerprint/service/soft_sensor/sensor83/Android.mk
+@@ -9,8 +9,8 @@ LOCAL_SRC_FILES := \
+ 	algorithm/sensor83_navigate.c \
+ 	algorithm/check_press.c \
+ 	algorithm/sensor83_judge_diff_module.c \
+-	algorithm/sensor83_judge_finger.c \
+ 	algorithm/sensor83_press_detect.c \
++	algorithm/sensor83_finger_detect.c \
+ 	sensor_83.c \
+ 	sensor_context.c \
+ 	sensor_wrapper.c \
+diff --git a/fingerprint/service/soft_sensor/sensor83/algorithm/algorithm.h b/fingerprint/service/soft_sensor/sensor83/algorithm/algorithm.h
+index 1e3f100..8c784a9 100644
+--- a/fingerprint/service/soft_sensor/sensor83/algorithm/algorithm.h
++++ b/fingerprint/service/soft_sensor/sensor83/algorithm/algorithm.h
+@@ -30,8 +30,9 @@ void checkFullC(int *firstChange, int *preFull, int *fullChange, int *tagFullC,
+ int checkUse(u8 *tagCur);
+ int fp83_get_var(int *imgRaw, int *imgBkg, unsigned char grey_offset);
+ float fp83_diff_module(int* imgBuf1, int *imgBuf2);
+-int gradxy(char *impha,int width,int height);
++//int gradxy(char *impha,int width,int height);
+ int get_temp_txt(char *temp,int *src,int len);
+ int cpress_detet(int *img,int width,int height);
++int finger_detect(u8 *img1);
+ 
+ #endif /* ALGORITHM_H_ */
+diff --git a/fingerprint/service/soft_sensor/sensor83/algorithm/detect.c b/fingerprint/service/soft_sensor/sensor83/algorithm/detect.c
+index 4e81c62..178d6ae 100644
+--- a/fingerprint/service/soft_sensor/sensor83/algorithm/detect.c
++++ b/fingerprint/service/soft_sensor/sensor83/algorithm/detect.c
+@@ -16,7 +16,7 @@ int fp83_press_detect( int *imgRaw, int *imgBkg, unsigned char grey_offset )
+     int TH, count;
+     int val = ((unsigned int)grey_offset << 4) | 0x0f;
+     count = 0;
+-    TH = 100;
++    TH = 80;
+     for ( j = 4; j < 124; j++ ) {
+         for ( i = 4; i < 76; i++ ) {
+             count += ( ( (imgRaw + j*80)[i] - (imgBkg + j*80)[i] ) > TH ) ? 1 : 0;
+diff --git a/fingerprint/service/soft_sensor/sensor83/sensor_wrapper.c b/fingerprint/service/soft_sensor/sensor83/sensor_wrapper.c
+index 9d9a068..80ddf7e 100644
+--- a/fingerprint/service/soft_sensor/sensor83/sensor_wrapper.c
++++ b/fingerprint/service/soft_sensor/sensor83/sensor_wrapper.c
+@@ -267,7 +267,7 @@ static int sensor83_refresh_calibrate_data(void) {
+ }
+ 
+ static int sensor83_get_proper_image(void *img, const int len,
+-		const int line_step) {
++		const int line_step, int type) {
+ 	int ret = SUCCESS;
+ 	int *image = (int *) img;
+ 
+@@ -280,13 +280,16 @@ static int sensor83_get_proper_image(void *img, const int len,
+ 	}
+ 	fp83_read_image(image, len, line_step, 1);
+ 	ret = check_grey(image);
+-
+-	if(ret != SUCCESS) {
+-	    sensor83_refresh_calibrate_data();
+-	    context_set_sensor83_interrupt_calibrated(0);
+-	    context_set_sensor83_param_calibrated(0);
+-	    save_sensor83_context();
+-	}
++    fp83_remove_bkg(image, context_get_sensor83_bkg(),
++            g83_authen_ctx->remove_bkg_img, g83_enroll_ctx->proc_buf, g_sensor83_grey_offset);
++    int isfinger= finger_detect(g83_authen_ctx->remove_bkg_img);
++    LOGD("---ret = %d,isfinger = %d", ret, isfinger);
++    if(ret != SUCCESS && isfinger != 0 && type != AUTHENTICATE_DETECT) {
++        sensor83_refresh_calibrate_data();
++        context_set_sensor83_interrupt_calibrated(0);
++        context_set_sensor83_param_calibrated(0);
++        save_sensor83_context();
++    }
+ 
+ 	LOGD("end, ret = %d.\n", ret);
+ 
+@@ -423,7 +426,7 @@ static int algorithm83_press_detect_texture(void *image, int type) {
+ 	    ret = (sratio > 25) ? NORMAL_PRESSED : NORMAL_UNPRESSED;
+ 	    break;
+ 	case ENROLL_DETECT:
+-	    ret = (sratio > 90) ? NORMAL_PRESSED : NORMAL_UNPRESSED;
++	    ret = (sratio > 80) ? NORMAL_PRESSED : NORMAL_UNPRESSED;
+ 	    break;
+ 	case PRESS_DETECT:
+ 	    ret = (sratio > 20) ? NORMAL_PRESSED : NORMAL_UNPRESSED;
+@@ -870,7 +873,7 @@ static int sensor83_factory_test_get_image(void *image) {
+ 	LOGD("start.\n");
+ 	ret = sensor83_capture_mode();
+ 	if (ret == SUCCESS) {
+-		ret = sensor83_get_proper_image(image_in, IMAGE_SIZE, 1);
++		ret = sensor83_get_proper_image(image_in, IMAGE_SIZE, 1,CAPTURE_DETECT);
+ 		if (ret == SUCCESS) {
+ 			ret = algorithm83_press_detect_texture(image_in, CAPTURE_DETECT);
+ 			energy = algorithm83_get_energy(image_in);
+diff --git a/fingerprint/service/soft_sensor/sensor_adapter.c b/fingerprint/service/soft_sensor/sensor_adapter.c
+index b58d740..2410b7a 100644
+--- a/fingerprint/service/soft_sensor/sensor_adapter.c
++++ b/fingerprint/service/soft_sensor/sensor_adapter.c
+@@ -143,9 +143,9 @@ int sensor_destory(void)
+     return g_soft_sensor.sensor_destory();
+ }
+ 
+-int sensor_get_proper_image(void *image, const int len, const int line_step)
++int sensor_get_proper_image(void *image, const int len, const int line_step, int type)
+ {
+-    return g_soft_sensor.sensor_get_proper_image(image, len, line_step);
++    return g_soft_sensor.sensor_get_proper_image(image, len, line_step, type);
+ }
+ 
+ int sensor_reset_mode(void)
+diff --git a/version/product.csv b/version/product.csv
+index 18af8d2..056dcac 100644
+--- a/version/product.csv
++++ b/version/product.csv
+@@ -20,5 +20,6 @@ A156,Yude,A121_N,Trustonic,armeabi arm64-v8a,Android6.0,Yes,Yes,Yes,No,14,3
+ Z285,Yude,A121_N,Trustkernel,arm64-v8a,Android6.0,Yes,Yes,Yes,Yes,14,3
+ F620,XINGFEI,A83_T,Android,arm64-v8a,Android6.0,Yes,Yes,Yes,No,14,3
+ Android,Hct,A120_N,Trustkernel,arm64-v8a armeabi,Android6.0,Yes,Yes,Yes,No,14,3
+-DOGE_A63,Kusai,A83_N,Android,arm64-v8a,Android6.0,Yes,Yes,Yes,No,14,3
++DOGE_A63,Kusai,A83_T,Android,arm64-v8a armeabi,Android8.0,Yes,Yes,Yes,No,14,3
++DOGE_A63,Kusai,A64_N,Trustkernel,arm64-v8a armeabi,Android6.0,Yes,Yes,Yes,No,14,3
+ isharkL2,ZhanXun,A83_N,Watchtrust,x86_64,Android6.0,Yes,Yes,Yes,No,12,3
+diff --git a/version/test.csv b/version/test.csv
+index f04c3b7..a3be922 100644
+--- a/version/test.csv
++++ b/version/test.csv
+@@ -52,7 +52,7 @@ Default,Android,A96_N,RSEE,arm64-v8a armeabi-v7a,Android6.0,Yes,Yes,Yes,No,14,3
+ Default,Android,A120_N&A96_N,Android,arm64-v8a armeabi-v7a,Android6.0,Yes,Yes,Yes,No,14,3
+ Default,Android,A96_N,Trusty,armeabi-v7a,Android6.0,Yes,Yes,Yes,No,14,3
+ Default,Android,A83_N,Trusty,armeabi-v7a,Android6.0,Yes,Yes,Yes,No,14,3
+-Default,Android,A64_N,Android,arm64-v8a,Android6.0,Yes,Yes,Yes,No,14,3
++Default,Android,A64_N,Trustkernel_thr_sdk,arm64-v8a armeabi,Android6.0,Yes,Yes,Yes,No,14,3
+ Default,Android,A72_N,Android,arm64-v8a,Android6.0,Yes,Yes,Yes,No,14,3
+ Default,Android,A48_N,Android,arm64-v8a,Android6.0,Yes,Yes,Yes,No,14,3
+ Default,Android,A96_N&A88_N&A64_N&A48_N,Android,arm64-v8a,Android6.0,Yes,Yes,Yes,No,14,3

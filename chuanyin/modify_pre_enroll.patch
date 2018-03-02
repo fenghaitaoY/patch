@@ -1,0 +1,81 @@
+diff --git a/fingerprint/client/libfprint/include/globalvar.h b/fingerprint/client/libfprint/include/globalvar.h
+index f271c66..d880b20 100644
+--- a/fingerprint/client/libfprint/include/globalvar.h
++++ b/fingerprint/client/libfprint/include/globalvar.h
+@@ -43,4 +43,5 @@ extern unsigned int g_driver_version;
+ extern int g_auth_num;
+ extern int g_auth_image_num;
+ extern int g_work_enroll;
++extern int g_auth_status;
+ #endif /* GLOBALVAR_H_ */
+diff --git a/fingerprint/client/libfprint/interface/ca_interface.c b/fingerprint/client/libfprint/interface/ca_interface.c
+index 8c7da30..6d085c9 100644
+--- a/fingerprint/client/libfprint/interface/ca_interface.c
++++ b/fingerprint/client/libfprint/interface/ca_interface.c
+@@ -22,7 +22,7 @@ microarray_properties_t g_config;
+ bio_status_t g_bio_status = {0};
+ bio_context_t g_bio_context = {0};
+ int g_work_enroll = 0;
+-
++int g_auth_status = 0;
+ /*hal层的准备工作
+  * @return 0:success
+  */
+@@ -32,6 +32,7 @@ int bio_init(void)
+     g_bio_context.cover_type = 0;
+     g_bio_context.chip_id = 0;
+     g_bio_status.is_fp_canceled = 0;
++    g_auth_status = 0;
+ 
+     LOGD("start,is inited = %d", g_bio_status.is_bio_inited);
+     if ( g_bio_status.is_bio_inited ) {
+@@ -171,6 +172,7 @@ int bio_authenticate(uint64_t operation_id, uint32_t gid)
+ //        enqueue_cmd(authenticate_detect_work, (void*)&cmd_auth, PROCESS_AUTHENTICATE);
+ //    }
+ 
++    g_auth_status = 1;
+     LOGD("end.");
+     return SUCCESS;
+ 
+@@ -215,6 +217,7 @@ int bio_cancel(void)
+ 	}
+ 	LOGD("start.\n");
+ 	// auth state may need wakeup
++    g_auth_status = 0;
+ 	if(g_bio_status.is_fp_canceled) {
+ 	    LOGD("end, duplicate cancel.\n");
+ 	    return SUCCESS;
+@@ -222,7 +225,7 @@ int bio_cancel(void)
+     g_work_enroll = 0;
+ 	g_bio_status.is_fp_canceled = 1;
+     cancel_cmd();
+-    
++
+     ma_tac_cancel();
+ 
+ 	if (g_config.system_version >= 7)
+@@ -249,7 +252,11 @@ uint64_t bio_pre_enroll(void)
+     int ret = SUCCESS;
+     g_bio_status.is_fp_canceled = 0;
+ #ifdef OEM_CHUANYIN
+-    LOGD(" OEM chuanyin not cancel cmd");
++    LOGD(" OEM chuanyin pre_enroll cancel cmd");
++    if (g_auth_status != 1){
++        LOGD("cancel_cmd");
++        cancel_cmd();
++    }
+ #else
+     cancel_cmd();
+ #endif
+diff --git a/fingerprint/client/libfprint/process/authenticate.c b/fingerprint/client/libfprint/process/authenticate.c
+index c7b78e5..56470f1 100644
+--- a/fingerprint/client/libfprint/process/authenticate.c
++++ b/fingerprint/client/libfprint/process/authenticate.c
+@@ -108,6 +108,7 @@ static int verify(struct cmd_entry *qe)
+             dc_send_cmd(TIMEOUT_WAKELOCK);
+             authenticate_notify(cmd_auth->gid, fid, &g_bio_context.auth_token);
+             gettimeofday(&now,NULL);
++            g_auth_status = 0;
+ 
+             auth_time = now.tv_sec * 1000 + now.tv_usec / 1000 - auth_start_timestamp;
+             LOGD("auth_start_timestamp %llu", (long long unsigned int)auth_start_timestamp);
