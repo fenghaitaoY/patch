@@ -1,0 +1,46 @@
+diff --git a/fingerprint/client/libfprint/process/enroll.c b/fingerprint/client/libfprint/process/enroll.c
+index d3a6e8a..ac676dd 100644
+--- a/fingerprint/client/libfprint/process/enroll.c
++++ b/fingerprint/client/libfprint/process/enroll.c
+@@ -72,6 +72,7 @@ void* enroll_work(void * q)
+ 	ma_tac_spi_test();
+     do {
+         if ( !cancelflag ) {
++            usleep(50000);
+             down = ma_tac_detectTouch_getEnergy();
+             //LOGD("detect touch down = %d \n",down);
+             if(down < 0) {
+@@ -116,6 +117,7 @@ void* enroll_work(void * q)
+                 presscount--;
+             }
+         }
++        usleep(50000);
+         // has finger
+         if (!cancelflag && down) {
+             // enroll
+diff --git a/fingerprint/service/soft_sensor/sensor64/sensor_wrapper.c b/fingerprint/service/soft_sensor/sensor64/sensor_wrapper.c
+index 3dc4a47..8795674 100644
+--- a/fingerprint/service/soft_sensor/sensor64/sensor_wrapper.c
++++ b/fingerprint/service/soft_sensor/sensor64/sensor_wrapper.c
+@@ -385,7 +385,7 @@ static int algorithm64_press_detect_texture(void *image, int type) {
+ 	            minc=MAX;
+ 	            maxc=MIN;
+ 	            g64_authen_ctx->dirty_num = 0;
+-	            memcpy(g64_authen_ctx->remove_bkg_pre, g64_authen_ctx->remove_bkg_img, IMAGE_SIZE);
++	            memcpy(g64_authen_ctx->remove_bkg_pre, g64_authen_ctx->remove_bkg_img, IMAGE_T_SIZE);
+ 	        }
+ 	    }
+ 
+diff --git a/version/test.csv b/version/test.csv
+index f04c3b7..347dabb 100644
+--- a/version/test.csv
++++ b/version/test.csv
+@@ -52,7 +52,7 @@ Default,Android,A96_N,RSEE,arm64-v8a armeabi-v7a,Android6.0,Yes,Yes,Yes,No,14,3
+ Default,Android,A120_N&A96_N,Android,arm64-v8a armeabi-v7a,Android6.0,Yes,Yes,Yes,No,14,3
+ Default,Android,A96_N,Trusty,armeabi-v7a,Android6.0,Yes,Yes,Yes,No,14,3
+ Default,Android,A83_N,Trusty,armeabi-v7a,Android6.0,Yes,Yes,Yes,No,14,3
+-Default,Android,A64_N,Android,arm64-v8a,Android6.0,Yes,Yes,Yes,No,14,3
++Default,Android,A64_N,Android,arm64-v8a armeabi,Android6.0,Yes,Yes,Yes,No,14,3
+ Default,Android,A72_N,Android,arm64-v8a,Android6.0,Yes,Yes,Yes,No,14,3
+ Default,Android,A48_N,Android,arm64-v8a,Android6.0,Yes,Yes,Yes,No,14,3
+ Default,Android,A96_N&A88_N&A64_N&A48_N,Android,arm64-v8a,Android6.0,Yes,Yes,Yes,No,14,3

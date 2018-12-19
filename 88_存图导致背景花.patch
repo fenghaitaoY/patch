@@ -1,0 +1,110 @@
+diff --git a/fingerprint/client/libfprint/tac/microarray_tac.c b/fingerprint/client/libfprint/tac/microarray_tac.c
+index 4fb4b62..81e24a2 100644
+--- a/fingerprint/client/libfprint/tac/microarray_tac.c
++++ b/fingerprint/client/libfprint/tac/microarray_tac.c
+@@ -159,10 +159,10 @@ static void save_enroll_image(int is_success, void *image)
+ 				sprintf(srcbmp_name, "/data/system/users/0/fpdata/enroll_fail_%.4d_%.4d_src.bmp", g_enroll_num, g_enroll_image_num);
+ 			}
+ 			if (g_bio_context.chip_id == 83 || g_bio_context.chip_id == 88 || g_bio_context.chip_id == 72) {
+-				save_rawdata_file(src_name, image, wt, ht);
+-				save_bmp_file(srcbmp_name, image + wt*ht*4, w, h);
+-				save_bmp_file(removebkg_name, image + wt*ht*4 + w*h, w, h);
+-				save_bmp_file("/data/system/users/0/fpdata/bg.bmp", image + wt*ht*4 + w*h*2, w, h);
++				save_rawdata_file(src_name, image, w, h);
++				save_bmp_file(srcbmp_name, image, w, h);
++				save_bmp_file(removebkg_name, image + w*h, w, h);
++				save_bmp_file("/data/system/users/0/fpdata/bg.bmp", image + w*h*2, w, h);
+ 			} else {
+ 				save_bmp_file(srcbmp_name, image, w, h);
+ 				save_bmp_file(removebkg_name, image + w*h, w, h);
+@@ -263,10 +263,10 @@ static void save_auth_image(int fid, int match_ret, void *image)
+ 					sprintf(srcbmp_name, "/data/system/users/0/fpdata/auth_%.4d_%.4d_%.4d_fail_src.bmp", g_auth_num, match_ret, g_auth_image_num);
+ 				}
+ 				if (g_bio_context.chip_id == 83 || g_bio_context.chip_id == 88 || g_bio_context.chip_id == 72) {
+-					save_rawdata_file(src_name, image, wt, ht);
+-					save_bmp_file(srcbmp_name, image + wt*ht*4, w, h);
+-					save_bmp_file(removebkg_name, image + wt*ht*4 + w*h, w, h);
+-					save_bmp_file("/data/system/users/0/fpdata/bg.bmp", image + wt*ht*4 + w*h*2, w, h);
++					save_rawdata_file(src_name, image, w, h);
++					save_bmp_file(srcbmp_name, image, w, h);
++					save_bmp_file(removebkg_name, image + w*h, w, h);
++					save_bmp_file("/data/system/users/0/fpdata/bg.bmp", image + w*h*2, w, h);
+ 				} else {
+ 					save_bmp_file(srcbmp_name, image, w, h);
+ 					save_bmp_file(removebkg_name, image + w*h, w, h);
+diff --git a/fingerprint/service/malib/Android.mk b/fingerprint/service/malib/Android.mk
+index 86876ee..36b32db 100644
+--- a/fingerprint/service/malib/Android.mk
++++ b/fingerprint/service/malib/Android.mk
+@@ -13,9 +13,9 @@ LOCAL_SRC_FILES := \
+ 	utils/malog.c \
+ 	utils/masnprintf.c \
+ 	utils/masqrt.c \
+-	utils/maatan.c
+-	#utils/bitmap.c\
+-	#pgm/pgm.c
++	utils/maatan.c \
++	utils/bitmap.c\
++	pgm/pgm.c
+ 
+ LOCAL_MODULE := malib
+ 
+diff --git a/fingerprint/service/soft_sensor/sensor88/sensor_wrapper.c b/fingerprint/service/soft_sensor/sensor88/sensor_wrapper.c
+index 50acc6e..7a2a6ac 100644
+--- a/fingerprint/service/soft_sensor/sensor88/sensor_wrapper.c
++++ b/fingerprint/service/soft_sensor/sensor88/sensor_wrapper.c
+@@ -407,7 +407,7 @@ static void save_press_bmp(int expect_type, int current_type, int *img) {
+ 		memcpy(g88_debug_image + IMAGE_SIZE, g88_authen_ctx->remove_bkg_img, IMAGE_SIZE); //去背景图
+ 		memset(compress_img, 0, sizeof(compress_img));
+ 		compress_image(context_get_sensor88_bkg() + IMAGE_W, compress_img);
+-		memcpy(g88_debug_image + IMAGE_SIZE * 2, compress_img, IMAGE_SIZE); //背景图
++		memcpy(g88_debug_image + IMAGE_SIZE * 3, compress_img, IMAGE_SIZE); //背景图
+ 	}
+ }
+ 
+@@ -731,24 +731,22 @@ static int algorithm88_navigate_direction(uint32_t *navi_result) {
+ 
+ static int sensor88_debug_get_enroll_img(void *img) {
+     if (g_config.save_debug_bmp) {
+-		memcpy((unsigned char *) img, protocol_image_buffer, sizeof(protocol_image_buffer));
+-		memcpy((unsigned char *) img + sizeof(protocol_image_buffer), (unsigned char *) g88_debug_image, IMAGE_SIZE);
+-		memcpy((unsigned char *) img + sizeof(protocol_image_buffer) + IMAGE_SIZE,
++		memcpy((unsigned char *) img, (unsigned char *) g88_debug_image, IMAGE_SIZE);
++		memcpy((unsigned char *) img + IMAGE_SIZE,
+ 				(unsigned char *) (g88_debug_image + IMAGE_SIZE), IMAGE_SIZE);
+-		memcpy((unsigned char *) img + sizeof(protocol_image_buffer) + IMAGE_SIZE * 2,
+-				(unsigned char *) (g88_debug_image + IMAGE_SIZE * 2), IMAGE_SIZE);
++	    memcpy((unsigned char *) img + IMAGE_SIZE * 2,
++				(unsigned char *) (g88_debug_image + IMAGE_SIZE * 3), IMAGE_SIZE);
+     }
+ 	return SUCCESS;
+ }
+ 
+ static int sensor88_debug_get_authenticate_img(void *img) {
+     if (g_config.save_debug_bmp) {
+-		memcpy((unsigned char *) img, protocol_image_buffer, sizeof(protocol_image_buffer));
+-		memcpy((unsigned char *) img + sizeof(protocol_image_buffer), (unsigned char *) g88_debug_image, IMAGE_SIZE);
+-		memcpy((unsigned char *) img + sizeof(protocol_image_buffer) + IMAGE_SIZE,
++		memcpy((unsigned char *) img, (unsigned char *) g88_debug_image, IMAGE_SIZE);
++		memcpy((unsigned char *) img + IMAGE_SIZE,
+ 				(unsigned char *) (g88_debug_image + IMAGE_SIZE), IMAGE_SIZE);
+-		memcpy((unsigned char *) img + sizeof(protocol_image_buffer) + IMAGE_SIZE * 2,
+-				(unsigned char *) (g88_debug_image + IMAGE_SIZE * 2), IMAGE_SIZE);
++	    memcpy((unsigned char *) img + IMAGE_SIZE * 2,
++				(unsigned char *) (g88_debug_image + IMAGE_SIZE * 3), IMAGE_SIZE);
+     }
+ 	return SUCCESS;
+ }
+diff --git a/fingerprint/service/soft_sensor/sensor88/wrapper_v2.c b/fingerprint/service/soft_sensor/sensor88/wrapper_v2.c
+index f242183..0f9fb78 100644
+--- a/fingerprint/service/soft_sensor/sensor88/wrapper_v2.c
++++ b/fingerprint/service/soft_sensor/sensor88/wrapper_v2.c
+@@ -141,7 +141,7 @@ static void save_enroll_bmp(unsigned char *img) {
+ 		 for (i = 0; i < IMAGE_SIZE; i++) {
+ 			 compress_img[i] = context_get_sensor88_bkg()[i + IMAGE_W] * 255 / ((g88_grey_offset << 4) | 0x0f);
+ 		 }
+-		 memcpy(g88_debug_image + IMAGE_SIZE * 2, compress_img, IMAGE_SIZE); //背景图
++		 memcpy(g88_debug_image + IMAGE_SIZE * 3, compress_img, IMAGE_SIZE); //背景图
+ 	}
+ }
+ 

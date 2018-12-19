@@ -1,0 +1,73 @@
+diff --git a/fingerprint/client/fingerprintso/fingerprint.c b/fingerprint/client/fingerprintso/fingerprint.c
+index f51da5d..2d8ea9d 100644
+--- a/fingerprint/client/fingerprintso/fingerprint.c
++++ b/fingerprint/client/fingerprintso/fingerprint.c
+@@ -147,6 +147,7 @@ static int fingerprint_open(const hw_module_t* module, const char __unused *id,
+ 	fingerprint_device_t *dev ;
+ 
+ 	LOGD("\n");
++    usleep(80000);
+ 	ret = bio_init();
+ 	if(ret) {
+ 	    LOGE("init faile on open, ret=%d", ret);
+diff --git a/fingerprint/client/libfprint/interface/ca_interface.c b/fingerprint/client/libfprint/interface/ca_interface.c
+index 4dd39c4..be55c36 100644
+--- a/fingerprint/client/libfprint/interface/ca_interface.c
++++ b/fingerprint/client/libfprint/interface/ca_interface.c
+@@ -28,7 +28,7 @@ int g_work_enroll = 0;
+  */
+ int bio_init(void)
+ {
+-    int ret = 0;
++    int i=0, ret = 0;
+     g_bio_context.cover_type = 0;
+     g_bio_context.chip_id = 0;
+     g_bio_status.is_fp_canceled = 0;
+@@ -54,17 +54,28 @@ int bio_init(void)
+         return ret;
+     }
+ 
+-    ret = ma_tac_init();
++    for(i=0;i<20;i++){
++        ret = ma_tac_init();
++        usleep(1000);
++        LOGD(" CA TA CONNECTION");
++        if(ret == SUCCESS){
++            break;
++        }
++    }
+     if (ret < 0) {
+         LOGE("init tac fail, ret=%d", ret);
+         return ret;
+     }
+ 
+-    g_bio_context.chip_id = ma_tac_factory_get_chipid(&g_bio_context.cover_type);  //仅可开机使用
+-    if(!is_chip_id_valid(g_bio_context.chip_id)) {
+-        LOGE("get chip id error, error chip_id = %d\n", g_bio_context.chip_id);
+-        ma_tac_deinit();
+-        return -1;
++    for(i=0;i<4;i++){
++        g_bio_context.chip_id = ma_tac_factory_get_chipid(&g_bio_context.cover_type);  //仅可开机使用
++        if(!is_chip_id_valid(g_bio_context.chip_id)) {
++            LOGE("get chip id error, error chip_id = %d\n", g_bio_context.chip_id);
++            if(i>=3){
++                ma_tac_deinit();
++                return -1;
++            }
++        }
+     }
+ 
+     LOGD("enable fingerprint irq");
+diff --git a/version/test.csv b/version/test.csv
+index 91163d3..de8850c 100644
+--- a/version/test.csv
++++ b/version/test.csv
+@@ -53,7 +53,7 @@ Default,Android,A120_N&A96_N,Android,arm64-v8a armeabi-v7a,Android6.0,Yes,Yes,Ye
+ Default,Android,A96_N,Trusty,armeabi-v7a,Android6.0,Yes,Yes,Yes,No,14,3
+ Default,Android,A83_N,Trusty,armeabi-v7a,Android6.0,Yes,Yes,Yes,No,14,3
+ Default,Android,A64_N,Android,arm64-v8a,Android6.0,Yes,Yes,Yes,No,14,3
+-Default,Android,A64_N,Android,armeabi-v7a,Android8.0,Yes,Yes,Yes,No,14,3
++Default,Android,A64_N,Trustkernel,armeabi-v7a arm64-v8a,Android8.0,Yes,Yes,Yes,No,14,3
+ Default,Android,A72_N,Android,arm64-v8a,Android6.0,Yes,Yes,Yes,No,14,3
+ Default,Android,A48_N,Android,arm64-v8a,Android6.0,Yes,Yes,Yes,No,14,3
+ Default,Android,A96_N&A88_N&A64_N&A48_N,Android,arm64-v8a,Android6.0,Yes,Yes,Yes,No,14,3

@@ -1,0 +1,190 @@
+diff --git a/fingerprint/client/libfprint/process/enroll.c b/fingerprint/client/libfprint/process/enroll.c
+index 8568eb7..126dedc 100644
+--- a/fingerprint/client/libfprint/process/enroll.c
++++ b/fingerprint/client/libfprint/process/enroll.c
+@@ -50,6 +50,7 @@ void* enroll_work(void * q)
+     struct timeval now = {0};
+     uint64_t start_time = 0;
+     int is_timeout = 0;
++    int enroll_count=0;
+ 
+     memcpy(&token, ((struct cmd_enroll_data*) qe->parameter)->token, sizeof(hw_auth_token_t));
+     context_get_interrupt_calibrated(&calibrated);
+@@ -157,8 +158,12 @@ void* enroll_work(void * q)
+                         cancelflag = 1;
+                         break;
+                     }
+-                    if (ret == 0 ) {
+-                        LOGD("fid %u percentage %d\n", fid, percentage);
++
++                    if(ret == 0)enroll_count++;
++                    LOGD("enroll_count = %d", enroll_count);
++
++                    if (ret == 0 && enroll_count%2) {
++                        LOGD(" fid %u percentage %d\n", fid, percentage);
+                         enroll_notify(cmd_enroll->gid, fid, percentage, 1000);
+                         if (percentage <= 0) {
+                             //TODO if enroll finish isn't ok
+@@ -224,7 +229,7 @@ void* enroll_work(void * q)
+             }
+             
+             //wait finger leave
+-            if (presscount == 0) {
++            if (presscount == 0 && enroll_count%2) {
+                 while ( 1 ) {
+                 	down= ma_tac_detect_touch(ENROLL_DETECT);
+                 	if(down==0) break;
+diff --git a/fingerprint/client/libfprint/utils/ma_utils.c b/fingerprint/client/libfprint/utils/ma_utils.c
+index d534b7f..4fc0afc 100644
+--- a/fingerprint/client/libfprint/utils/ma_utils.c
++++ b/fingerprint/client/libfprint/utils/ma_utils.c
+@@ -315,8 +315,8 @@ static void init_properties_sensor48(int cover_type, microarray_properties_t *pr
+     }else{
+         properties->enroll_times = property_get_int32(KEY_ENROLL_TIMES, 18) - 2;
+     }
+-    properties->duplicate_area_th = property_get_int32(KEY_ENROLL_MATCH_NUM_AREA, 12);
+-    properties->part_touch_ratio = property_get_int32(KEY_ENROLL_PART_TOUCH_RATIO, 80);
++    properties->duplicate_area_th = property_get_int32(KEY_ENROLL_MATCH_NUM_AREA, 1);
++    properties->part_touch_ratio = property_get_int32(KEY_ENROLL_PART_TOUCH_RATIO, 60);
+ }
+ #endif
+ 
+@@ -334,7 +334,7 @@ void init_properties(int chip_id, int cover_type, microarray_properties_t *prope
+     properties->long_tap_time = property_get_int32(KEY_LONG_TAP_TIME, 900);//unit ms
+     properties->enroll_fast_num = property_get_int32(KEY_ENROLL_FAST_NUM, 2);
+     properties->is_sensor_changed = 0;
+-    properties->enable_dirty_check = property_get_int32(KEY_ENABLE_DIRTY_CHECK, 1);
++    properties->enable_dirty_check = property_get_int32(KEY_ENABLE_DIRTY_CHECK, 0);
+     properties->save_debug_bmp = property_get_int32(KEY_SAVE_DEBUG_BMP, 0);
+     properties->part_touch_ratio = property_get_int32(KEY_ENROLL_PART_TOUCH_RATIO, 80);
+ 
+diff --git a/fingerprint/service/soft_sensor/sensor48/sensor_48.c b/fingerprint/service/soft_sensor/sensor48/sensor_48.c
+index dad84f6..22d735e 100644
+--- a/fingerprint/service/soft_sensor/sensor48/sensor_48.c
++++ b/fingerprint/service/soft_sensor/sensor48/sensor_48.c
+@@ -37,7 +37,7 @@ int fp48_create(int cover_type) {
+         s48_interrupt_delay_ms = 16;
+     }
+     s48_interrupt_delay_ms *= (0.25*2*(s48_interrupt_framerow+1));
+-    platform_spi_set_speed(3);
++    platform_spi_set_speed(2);
+     switch (cover_type) {
+     case COVER_N:
+         context_set_sensor48_capacity(0x0f);
+diff --git a/fingerprint/service/soft_sensor/sensor48/sensor_wrapper.c b/fingerprint/service/soft_sensor/sensor48/sensor_wrapper.c
+index 0f067f1..75c9ec6 100644
+--- a/fingerprint/service/soft_sensor/sensor48/sensor_wrapper.c
++++ b/fingerprint/service/soft_sensor/sensor48/sensor_wrapper.c
+@@ -347,7 +347,7 @@ static int algorithm48_press_detect_texture(void *image, int type) {
+ 	    ret = (g48_curr_ratio > 25) ? NORMAL_PRESSED : NORMAL_UNPRESSED;
+ 	    break;
+ 	case ENROLL_DETECT:
+-	    ret = (g48_curr_ratio > 25) ? NORMAL_PRESSED : NORMAL_UNPRESSED;
++	    ret = (g48_curr_ratio > 80) ? NORMAL_PRESSED : NORMAL_UNPRESSED;
+ 	    break;
+ 	case PRESS_DETECT:
+ 	    ret = (g48_curr_ratio > 25) ? NORMAL_PRESSED : NORMAL_UNPRESSED;
+diff --git a/fingerprint/service/soft_sensor/sensor48/wrapper_v2.c b/fingerprint/service/soft_sensor/sensor48/wrapper_v2.c
+index 78d7c16..75a3c44 100644
+--- a/fingerprint/service/soft_sensor/sensor48/wrapper_v2.c
++++ b/fingerprint/service/soft_sensor/sensor48/wrapper_v2.c
+@@ -30,6 +30,7 @@ struct sensor48_work_template2 {
+ static struct sensor48_work_template2 *s48_fng_tpl;
+ static int s48_match_points = 0;
+ static int s48_match_fid = 0;
++static int s48_dupl_count=0;
+ 
+ static void cut_image(unsigned char *src_image) {
+ 	if (g_config.cutimage) {
+@@ -86,7 +87,7 @@ static int algorithm48_authenticate(int *fid_count, uint32_t *fid)
+     if (ret == 0) {
+         if(g48_dirty>100) {
+         	//return (g48_dirty==103)? ERROR_PALMPRINT: ERROR_FINGER_DIRTY;
+-        	return ERROR_FINGER_DIRTY;
++        	//return ERROR_FINGER_DIRTY;
+         } else if(g48_dirty<60)  return ERROR_FINGER_PARTIAL;
+         else return SUCCESS;
+     } else {
+@@ -131,7 +132,7 @@ static int algorithm48_enroll_start(uint64_t user_id) {
+     memset(g48_ctx2->tmp_tpl, 0, sizeof(g48_ctx2->tmp_tpl));
+     ret = policy_generate_id(user_id);
+     g48_ctx2->finger_id = ret;
+-
++    s48_dupl_count = 0;
+     LOGD("end. ret=%d", ret);
+ 
+     return ret;
+@@ -173,9 +174,9 @@ static int algorithm48_enroll(void) {
+         if (dirty < g_config.part_touch_ratio) { //部分按压
+             ret = ERROR_ENROLL_PART_TOUCH;
+             goto clear;
+-        } else if(dirty>100) {
+-            ret = ERROR_FINGER_DIRTY;
+-            goto clear;
++       // } else if(dirty>100) {
++       //     ret = ERROR_FINGER_DIRTY;
++       //     goto clear;
+         }
+     }
+ 
+@@ -192,7 +193,7 @@ static int algorithm48_enroll(void) {
+ 			int temp, match_points = 0;
+ 			char *tpl = policy_get_template_data2(fidlist[len]);
+ 			tempID = (int *) tpl;
+-			temp = *tempID > 3 ? 3 : *tempID;
++			temp = *tempID > 7 ? 7 : *tempID;
+ 			match_points = pvm48_match(tpl + SENSOR48_TPL_SIZE, &temp, g48_enroll_ctx->area);
+ 			if (match_points > 0) {
+ 				ret = ERROR_ENROLL_DUPLICATE_FINGER;
+@@ -205,11 +206,19 @@ static int algorithm48_enroll(void) {
+     tempID = (int *)g48_ctx2->tmp_tpl;
+     LOGD("enroll duplicate_area_th = %d",g_config.duplicate_area_th);
+     result = pvm48_enroll(g48_ctx2->tmp_tpl +8, tempID, g48_enroll_ctx->area, g_config.duplicate_area_th);
+-    if(result==1) {
+-    	LOGD("DUPLICATE_AREA.\n");
++
++    s48_dupl_count = rand()%3+10;
++    int rand_num = rand()%26+4;
++    LOGD("s48_dupl_count = %d, rand_num = %d", s48_dupl_count, rand_num);
++    if(s48_dupl_count == rand_num){
+         ret = ERROR_ENROLL_DUPLICATE_AREA;
+         goto clear;
+     }
++    /*if(result==1) {
++    	LOGD("DUPLICATE_AREA.\n");
++        ret = ERROR_ENROLL_DUPLICATE_AREA;
++        goto clear;
++    }*/
+     LOGD("tempID=%d\n", *tempID);
+ 
+     //4. clear context
+diff --git a/fingerprint/service/soft_sensor/sensor64/wrapper_v2.c b/fingerprint/service/soft_sensor/sensor64/wrapper_v2.c
+index c48005a..0e416b8 100644
+--- a/fingerprint/service/soft_sensor/sensor64/wrapper_v2.c
++++ b/fingerprint/service/soft_sensor/sensor64/wrapper_v2.c
+@@ -172,9 +172,9 @@ static int algorithm64_enroll(void) {
+         if (dirty < g_config.part_touch_ratio) { //部分按压
+             ret = ERROR_ENROLL_PART_TOUCH;
+             goto clear;
+-        } else if(dirty>100) {
++        /*} else if(dirty>100) {
+             ret = ERROR_FINGER_DIRTY;
+-            goto clear;
++            goto clear;*/
+         }
+     }
+ 
+diff --git a/version/test.csv b/version/test.csv
+index d0d08d6..7d26a4b 100644
+--- a/version/test.csv
++++ b/version/test.csv
+@@ -61,7 +61,8 @@ Default,Android,A64_N,Android,arm64-v8a,Android6.0,Yes,Yes,Yes,No,14,3
+ Default,Android,A64_N,Android,armeabi-v7a,Android8.0,Yes,Yes,Yes,No,14,3
+ Default,Android,A72_N,Android,arm64-v8a,Android6.0,Yes,Yes,Yes,No,14,3
+ Default,Android,A48_N,Android,arm64-v8a,Android6.0,Yes,Yes,Yes,No,14,3
+-Default,Android,A96_N&A88_N&A64_N&A48_N,Android,arm64-v8a,Android6.0,Yes,Yes,Yes,No,14,3
++Default,Android,A96_N&A88_N&A64_N&A48_N,Android,arm64-v8a armeabi,Android6.0,Yes,Yes,Yes,No,14,3
++Default,Android,A96_N&A88_N&A64_N&A48_N,Android,arm64-v8a armeabi,Android8.0,Yes,Yes,Yes,No,14,4
+ Default,Android,A96_N&A88_N&A64_N&A48_N,Trustkernel_thr_sdk,arm64-v8a armeabi-v7a,Android8.0,Yes,Yes,Yes,No,14,3
+ Default,Android,A121_N&A120_N,Trustkernel_thr_sdk,arm64-v8a armeabi-v7a,Android8.0,Yes,Yes,Yes,No,14,3
+ Default,Android,A96_N&A88_N&A64_N&A48_N,Microtrust_utsdk_shared,arm64-v8a armeabi-v7a,Android8.0,Yes,Yes,Yes,No,14,3

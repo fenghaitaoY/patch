@@ -1,0 +1,181 @@
+diff --git a/fingerprint/client/libfprint/process/navigate.c b/fingerprint/client/libfprint/process/navigate.c
+index 0d44cfd..9231b00 100644
+--- a/fingerprint/client/libfprint/process/navigate.c
++++ b/fingerprint/client/libfprint/process/navigate.c
+@@ -76,6 +76,7 @@ static void error_trigger_count(uint32_t tap_result) {
+ 	uint32_t fids[FINGERPRINT_SIZE];
+ 	int fid_count = 0;
+ 
++    LOGD("-----tap_result = %d, trigger_count = %d", tap_result, trigger_count);
+ 	memset(fids, 0, sizeof(fids));
+ 	if (tap_result == NAVI_NONE) {
+ 		trigger_count++;
+@@ -117,9 +118,9 @@ void * navigate_work(void *q) {
+ 
+     /**************************** navigate ******************************/
+     while (1) {
+-#ifdef A120
+-        ma_tac_detect_touch(PRESS_DETECT);
+-#endif
++//#ifdef A120
++        //ma_tac_detect_touch(PRESS_DETECT);
++//#endif
+         ma_tac_sleep();
+         dc_send_cmd(SLEEP);
+         LOGD("go to kernel\n");
+@@ -183,7 +184,7 @@ void * navigate_work(void *q) {
+ 					need_report_long_tap = 0;
+ 
+                     LOGD("chipid=%d\n", g_bio_context.chip_id);
+-                    if (g_bio_context.chip_id == 48 || g_bio_context.chip_id == 64 ||
++                    /*if (g_bio_context.chip_id == 48 || g_bio_context.chip_id == 64 ||
+                             g_bio_context.chip_id == 88 || g_bio_context.chip_id == 112) {
+                         ma_tac_reverse_sleep();
+                         LOGD("go to kernel for unnormal\n");
+@@ -193,7 +194,7 @@ void * navigate_work(void *q) {
+                         ma_tac_reverse_wakeup();
+                         usleep(10 * 1000);
+                         break;
+-                    }
++                    }*/
+ 				}
+ 			}
+ 			if (navi_result == NAVI_NONE) {
+diff --git a/fingerprint/client/libfprint/process/refresh.c b/fingerprint/client/libfprint/process/refresh.c
+index 31d7d2b..52710bc 100644
+--- a/fingerprint/client/libfprint/process/refresh.c
++++ b/fingerprint/client/libfprint/process/refresh.c
+@@ -145,9 +145,19 @@ static void handler_calibrate_data(void)
+ static void handler_sensor_calibrate_data(void)
+ {
+     FLUSH_LOG("start.\n");
++    LOGD("-----fht start---");
+     if(push_cmd_for_factory_test() == SUCCESS) {
+-        if(ma_tac_refresh_calibrate_data() != SUCCESS) {
+-            FLUSH_LOG("refresh failed.");
++    LOGD("-----fht start---1111---");
++        if (ma_tac_detect_touch(PRESS_DETECT) == NORMAL_UNPRESSED) {
++    LOGD("-----fht start-- 22222-");
++            //if(ma_tac_refresh_calibrate_data() != SUCCESS) {
++                FLUSH_LOG("refresh failed.");
++                LOGD("------------------------------------------------fht---------------refresh failed start---");
++            //    usleep(1*1000);
++                ma_tac_refresh_calibrate_data();
++                ma_tac_reset_interrupt_para();
++                ma_tac_calc_interrupt_para();
++            //}
+         }
+         ma_tac_sleep();
+         pop_cmd_leave_factory_test();
+@@ -189,7 +199,11 @@ void refresh_timer(int is_sensor_changed) {
+             && calibrated && is_sensor_changed == 1) {
+         set_refresh(1, 5, 36, handler_sensor_calibrate_data);//3min
+     }
+-    set_refresh(1, 600, MAX_TIMES, handler_interrupt_parameters);
++    if(g_bio_context.chip_id == 64 || g_bio_context.chip_id == 48){
++        set_refresh(1, 4, 15*5, handler_sensor_calibrate_data);//3min
++    }
++
++    set_refresh(1, 60*2, MAX_TIMES, handler_interrupt_parameters);
+     pthread_mutex_init(&gCmdQmtx, NULL);
+     pthread_cond_init(&gCmdQcond, NULL);
+     sThreadExit = 0;
+diff --git a/fingerprint/service/soft_sensor/sensor64/sensor_64.c b/fingerprint/service/soft_sensor/sensor64/sensor_64.c
+index 47a9228..66fb5f3 100644
+--- a/fingerprint/service/soft_sensor/sensor64/sensor_64.c
++++ b/fingerprint/service/soft_sensor/sensor64/sensor_64.c
+@@ -151,7 +151,7 @@ static int fp64_detect_parameters(int n, int a, int int_reg, int main_reg) {
+ int fp64_detect_mode() {
+     int n = 0, a = 0, i, ret;
+     context_get_sensor64_interrupt_param(&n, &a);
+-    for(i=0;i<3;i++){
++    for(i=0;i<1;i++){
+         ret = fp64_detect_parameters(n, a, 0xa0, 0xf0);
+         if(ret == SUCCESS) break;
+     }
+@@ -436,6 +436,7 @@ static int calc_refdmy(int bkggreyavg) {
+ 
+     img = context_get_img_buf();
+ 
++    LOGD("----start--");
+     context_get_sensor64_capacity(&capacity);
+     context_get_sensor64_refctrl(&refctrl);
+     LOGD("capacity=0x%x refctrl=0x%x.\n", capacity, refctrl);
+@@ -485,10 +486,12 @@ static int calc_refdmy(int bkggreyavg) {
+     fp64_read_image(img, IMAGE_T_SIZE, 1);
+     context_get_sensor64_bkg_energy(&bkg_energy);
+     if (bkg_energy != 0x7fffffff) {
++        LOGD("-------------calc_refdmy-----start ");
+         cnt = fp64_press_detect(img, IMAGE_T_SIZE,
+                 context_get_sensor64_bkg(), g64_enroll_ctx->grey_offset);
++        LOGD("-------------calc_refdmy-----end cnt = %d ", cnt);
+         if (cnt > (IMAGE_SIZE / 4)) { // pressed
+-            LOGE("calc_para_press when cal dummy. real count=%d expect count=%d\n",
++            LOGE(" -----press----calc_para_press when cal dummy. real count=%d expect count=%d\n",
+                     cnt, IMAGE_SIZE / 4);
+             return ERROR_GET_REFDMY_FAIL;
+         } else {
+@@ -504,6 +507,7 @@ static int calc_refdmy(int bkggreyavg) {
+     }
+     LOGD("refdmy=0x%x, cur_temp=0x%x, ret=%d.\n", refdmy, cur_temp, ret);
+ 
++    LOGD("----end--");
+     return ret;
+ }
+ 
+@@ -519,6 +523,7 @@ int fp64_calc_init_parameters() {
+     if (ret == SUCCESS) {
+         if(s_calc_num == 0) {
+             context_set_sensor64_refctrl(refctrl);
++            LOGD("--fht------calc init 111---------");
+             ret = calc_refdmy(greyavg);
+             s_calc_num++;
+         } else {
+@@ -530,6 +535,7 @@ int fp64_calc_init_parameters() {
+             }
+ 
+             if((uint8_t)org_refctrl >= refctrl) {
++            LOGD("----fht----calc init 2222---------");
+                 ret = calc_refdmy(greyavg);
+             } else {
+                 LOGD("no need to refresh.");
+diff --git a/fingerprint/service/soft_sensor/sensor64/sensor_wrapper.c b/fingerprint/service/soft_sensor/sensor64/sensor_wrapper.c
+index a4719d3..1329db4 100644
+--- a/fingerprint/service/soft_sensor/sensor64/sensor_wrapper.c
++++ b/fingerprint/service/soft_sensor/sensor64/sensor_wrapper.c
+@@ -91,11 +91,12 @@ static int sensor_get_product_id() {
+  *          FAIL：失败
+  */
+ static int sensor64_calc_init_parameters(void) {
+-    int ret;
++    int ret, press;
+     unsigned char img[IMAGE_T_SIZE];
+ 
+     context_set_sensor64_param_calibrated(0);
+     ret = fp64_calc_init_parameters();
++    LOGD("------- fht --- ret = %d", ret);
+     if(ret == SUCCESS) {
+         ret = sensor64_get_proper_image(img, IMAGE_T_SIZE, 1);
+         if(ret == SUCCESS) {
+@@ -280,10 +281,10 @@ static int sensor64_get_proper_image(void *img, const int len, const int line_st
+         fp64_read_image(image, len, line_step);
+         press = algorithm64_press_detect_texture(image, PRESS_DETECT);
+         if (press == NORMAL_UNPRESSED && last_press == NORMAL_UNPRESSED) {
+-            if (sensor_bkg_check_by_temperate(image, IMAGE_H, IMAGE_T_W, 20, 2 * IMAGE_W) != SUCCESS) { //太暗
++            if (sensor_bkg_check_by_temperate(image, IMAGE_H, IMAGE_T_W, 14, 2 * IMAGE_W) != SUCCESS) { //太暗
+                 LOGD("image is dark. dark_num=%d.\n", dark_num);
+                 dark_num++;
+-                if(dark_num>5) {
++                if(dark_num>0) {
+                 	LOGD("image is dark. reinit refctl and dummy.\n");
+ 					fp64_calc_init_parameters();
+ 					sensor64_capture_mode();
+@@ -461,7 +462,7 @@ static int algorithm64_get_energy(void *image) {
+     		score, bkg_energy, g64_init_flag);
+     //更新背景图条件 - 1.流程还未到注册 2.有效图像 3.不是过爆后采的图像
+     if ((calibrated == 0 || (calibrated && g_config.is_sensor_changed && g64_refresh_cali_data)) && score > 0) {
+-        if  (!g64_init_flag || score < bkg_energy) {
++        if(score < 1000 && !g64_init_flag || score < bkg_energy) {
+             LOGD("update bkg\n");
+             g64_init_flag = 1;
+             context_set_sensor64_bkg(image_in);

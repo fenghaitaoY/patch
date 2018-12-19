@@ -1,0 +1,470 @@
+diff --git a/fingerprint/client/libfprint/process/authenticate.c b/fingerprint/client/libfprint/process/authenticate.c
+index 5913ace..7c6ea4c 100644
+--- a/fingerprint/client/libfprint/process/authenticate.c
++++ b/fingerprint/client/libfprint/process/authenticate.c
+@@ -176,6 +176,7 @@ static int verify(struct cmd_entry *qe)
+         if(down==0) {
+             break;
+         }else if(down == ERROR_FINGER_DIRTY) {
++                dirty_num++;
+                if(dirty_num>1) authenticate_notify(cmd_auth->gid, 0, &g_bio_context.auth_token);
+                acquired_event_notify(FINGERPRINT_ACQUIRED_IMAGER_DIRTY);
+                usleep(600*1000);
+diff --git a/fingerprint/client/libfprint/tac/gp_tac.c b/fingerprint/client/libfprint/tac/gp_tac.c
+index 910ef3a..32b0c3b 100644
+--- a/fingerprint/client/libfprint/tac/gp_tac.c
++++ b/fingerprint/client/libfprint/tac/gp_tac.c
+@@ -21,7 +21,7 @@ int ma_tac_create(void)
+ 	pthread_mutex_init(&tee_mtx, NULL);
+ 	
+ //add times for TEE loaddown fail ---start
+-for(tac_times=0; tac_times < 10; tac_times++){
++for(tac_times=0; tac_times < 600; tac_times++){
+ 	result = TEEC_InitializeContext(NULL, &context);
+ 	if (result != TEEC_SUCCESS) {
+ 		LOGE("bad initialize context: 0x%x\n", result);
+@@ -40,7 +40,7 @@ for(tac_times=0; tac_times < 10; tac_times++){
+ 	}
+ 		LOGE("bad open session 0x%x,tac_times =%d\n", result,tac_times);
+ 		TEEC_FinalizeContext(&context);
+-		usleep(10*1000);
++		usleep(100*1000);
+ }//add times for TEE loaddown fail ---end
+ 
+ 	if (result != TEEC_SUCCESS) {
+diff --git a/fingerprint/service/soft_sensor/common/sensor_common.c b/fingerprint/service/soft_sensor/common/sensor_common.c
+index 92c7011..ef811d0 100644
+--- a/fingerprint/service/soft_sensor/common/sensor_common.c
++++ b/fingerprint/service/soft_sensor/common/sensor_common.c
+@@ -87,11 +87,11 @@ int sensor_set_mode(int mode)
+             reg = MA_DETECT_MODE;
+             break;
+         case CAPTURE_MODE:
+-            time = 2;
++            time = 20;
+             reg = MA_CAPTURE_MODE;
+             break;
+         case RESET_MODE:
+-            time = 10;
++            time = 20;
+             reg = MA_RESET_MODE;
+             break;
+         default:
+diff --git a/fingerprint/service/soft_sensor/include/buffer.h b/fingerprint/service/soft_sensor/include/buffer.h
+index 56477e8..3efcb86 100644
+--- a/fingerprint/service/soft_sensor/include/buffer.h
++++ b/fingerprint/service/soft_sensor/include/buffer.h
+@@ -15,7 +15,7 @@
+ 
+ #include "config.h"
+ 
+-#define DRIVER_IMAGE_SIZE 15360*2
++#define DRIVER_IMAGE_SIZE 15360*3
+ int init_sensor_buffer(void);
+ void* context_get_driver_in_buf(void);
+ void* context_get_driver_out_buf(void);
+diff --git a/fingerprint/service/soft_sensor/sensor48/algorithm/navigate.c b/fingerprint/service/soft_sensor/sensor48/algorithm/navigate.c
+index 37500d0..8e032eb 100644
+--- a/fingerprint/service/soft_sensor/sensor48/algorithm/navigate.c
++++ b/fingerprint/service/soft_sensor/sensor48/algorithm/navigate.c
+@@ -306,7 +306,7 @@ int fp48_find_dif(s16* img2,s16 *img1,int centerx2,int centery2,int centerx1,int
+                 offsetx[off] = minx-i;
+                 offsety[off] = miny-j;
+ 
+-                printf(" x=%d  y=%d\n",offsetx[off],offsety[off]);
++                //printf(" x=%d  y=%d\n",offsetx[off],offsety[off]);
+ 
+                 off++;
+             }
+diff --git a/fingerprint/service/soft_sensor/sensor48/sensor_48.c b/fingerprint/service/soft_sensor/sensor48/sensor_48.c
+index 7d02967..6e20d0e 100644
+--- a/fingerprint/service/soft_sensor/sensor48/sensor_48.c
++++ b/fingerprint/service/soft_sensor/sensor48/sensor_48.c
+@@ -152,9 +152,12 @@ static int fp48_detect_parameters(int close_temp, int n, int a, int type) {
+ }
+ 
+ int fp48_detect_mode() {
+-    int n = 0, a = 0;
++    int n = 0, a = 0, i = 0, ret = 0;
+     context_get_sensor48_interrupt_param(&n, &a);
+-    fp48_detect_parameters(0, n, a, 0xa0);
++    for(i = 0; i < 3; i++){
++        ret = fp48_detect_parameters(0, n, a, 0xa0);
++        if(ret == SUCCESS) break;
++    }
+     LOGD("n = 0x%x, a = 0x%x\n", n, a);
+     return SUCCESS;
+ }
+@@ -578,16 +581,13 @@ int fp48_reset_interrupt_parameters(void) {
+ 
+ int fp48_deadpix_factory_test()
+ {
+-    const int IMAGE_TH = IMAGE_W, TEMP_TH = 10, DETECT_LINE = 23;
+-    int ret = SUCCESS, count = 0, row, col, avg;
++    const int IMAGE_TH = IMAGE_W, TEMP_TH = 10, DETECT_LINE = 23, MAX_STEPS = 512;
++    int ret = SUCCESS, count = 0, row, col;
+     unsigned char pImgA[IMAGE_T_SIZE];
+     unsigned char pImgB[IMAGE_T_SIZE];
+-    double th_low, th_high, diff;
++    double th_low, th_high, diff, avg;
+ 
+-    fp48_reset_mode();
+-    sensor_set_register(MA_48_REF_CTRL_REG, 0);
+-    sensor_set_register(MA_48_REF_DMY_REG, 0);
+-    sensor_set_register(MA_112UM_GREY_OFST_REG, 0);
++    fp48_capture_mode();
+     sensor_set_register(MA_VOLTAGE_CFG_REG, 0);
+     fp48_read_image(pImgA, IMAGE_T_SIZE, 1);
+ 
+@@ -596,18 +596,20 @@ int fp48_deadpix_factory_test()
+     fp48_read_image(pImgB, IMAGE_T_SIZE, 1);
+ 
+     avg = 0;
+-    row = IMAGE_T_SIZE;
+-    while ( row-- ) {
+-        if(row % IMAGE_T_W) {
+-            avg += pImgA[row];
++    for(row = 0; row < IMAGE_H; row++) {
++        for(col = 1; col < IMAGE_T_W; col++) {
++            avg += pImgA[row * IMAGE_T_W + col];
++            count++;
+         }
+     }
+-    avg /= IMAGE_SIZE;
+-    th_low = 0.1 * (256 - avg);
+-    th_high = 0.4 * (256 - avg);
++    avg /= count;//图像均值
++
++    count = 0;
++    th_low = 0.1 * (MAX_STEPS - avg);
++    th_high = 0.4 * (MAX_STEPS - avg);
+ 
+     for(row = 0; row < IMAGE_H; row++) {
+-        for(col = 1; col <= IMAGE_W; col++) {
++        for(col = 1; col < IMAGE_T_W; col++) {
+             diff = pImgB[row * IMAGE_T_W + col] - pImgA[row * IMAGE_T_W + col];
+             if ((diff < th_low) || (diff > th_high)) {
+                 count++;
+@@ -624,8 +626,8 @@ int fp48_deadpix_factory_test()
+             avg += pImgA[row*IMAGE_T_W];
+         }
+         avg /= IMAGE_H;//温度列的均值
+-        th_low = 0.1 * (256 - avg);
+-        th_high = 0.4 * (256 - avg);
++        th_low = 0.1 * (MAX_STEPS - avg);
++        th_high = 0.4 * (MAX_STEPS - avg);
+         if((pImgB[DETECT_LINE * IMAGE_T_W] - pImgA[DETECT_LINE*IMAGE_T_W] < th_low) ||
+                 (pImgB[DETECT_LINE * IMAGE_T_W] - pImgA[DETECT_LINE*IMAGE_T_W] > th_high)) {
+             LOGE("special temperature deadpix error.");
+diff --git a/fingerprint/service/soft_sensor/sensor48/sensor_wrapper.c b/fingerprint/service/soft_sensor/sensor48/sensor_wrapper.c
+index 00275cd..95d42bb 100644
+--- a/fingerprint/service/soft_sensor/sensor48/sensor_wrapper.c
++++ b/fingerprint/service/soft_sensor/sensor48/sensor_wrapper.c
+@@ -571,7 +571,8 @@ static int algorithm48_navigate_tap(uint32_t *navi_result) {
+         }
+         LOGD("image num=%d, compare_num=%d, total_offset=%d, avg_offset=%d", s_num, s_compare_num, s_offset, offset);
+         //dif2=100的次数/总比较次数 > 0.9 或 总比较次数 - dif2=100的次数 < 2  或 abs(ave) < 1  reutrn 0,没有位移
+-        if(s_none_offset_num * 10 / s_compare_num > 9 ||
++        if(s_compare_num == 0 ||
++            s_none_offset_num * 10 / s_compare_num > 9 ||
+                 s_compare_num - s_none_offset_num < 2 ||
+                 (offset < 1 && offset > -1)) {
+             s48_navi_result = NAVI_NONE;
+diff --git a/fingerprint/service/soft_sensor/sensor64/algorithm/navigate.c b/fingerprint/service/soft_sensor/sensor64/algorithm/navigate.c
+index db7dcc6..bce5605 100644
+--- a/fingerprint/service/soft_sensor/sensor64/algorithm/navigate.c
++++ b/fingerprint/service/soft_sensor/sensor64/algorithm/navigate.c
+@@ -561,7 +561,7 @@ int getFirstArea64(uint8_t *imgBkg, uint8_t *imgRaw, int *offset, int *centerX,
+ int getNaviResult64(int sumH, int sumH1, int sumW, int sumW1, int cntImg)
+ {
+ 	int tmpH, tmpW, tmpH1, tmpW1;
+-	const TH = 3;
++	const int TH = 3;
+ 
+ 	tmpH1 = (sumH1 > 0 ? sumH1 : -sumH1);
+ 	tmpW1 = (sumW1 > 0 ? sumW1 : -sumW1);
+diff --git a/fingerprint/service/soft_sensor/sensor64/sensor_64.c b/fingerprint/service/soft_sensor/sensor64/sensor_64.c
+index 26c965e..b1cc928 100644
+--- a/fingerprint/service/soft_sensor/sensor64/sensor_64.c
++++ b/fingerprint/service/soft_sensor/sensor64/sensor_64.c
+@@ -151,9 +151,12 @@ static int fp64_detect_parameters(int close_temp, int n, int a, int type) {
+ }
+ 
+ int fp64_detect_mode() {
+-    int n = 0, a = 0;
++    int n = 0, a = 0, i = 0, ret = 0;
+     context_get_sensor64_interrupt_param(&n, &a);
+-    fp64_detect_parameters(0, n, a, 0xa0);
++    for(i=0; i < 3; i++){
++        ret = fp64_detect_parameters(0, n, a, 0xa0);
++        if(ret == SUCCESS) break;
++    }
+     LOGD("n = 0x%x, a = 0x%x\n", n, a);
+     return SUCCESS;
+ }
+@@ -357,22 +360,11 @@ static int calc_refctrl(uint8_t *refctrl, int *greyavg) {
+     check_bkg_by_refctrl(tmp_img, min);
+     grey_real = sensor_get_grey_with_temp(tmp_img, IMAGE_T_SIZE);
+     LOGD("min = 0x%x, grey_real=0x%x\n", min, grey_real);
+-
+-    if (grey_0x80 != 0 && grey_0x40 != 0 && grey_real != 0) { //范围是[0x80,0xff]3个点筛选
+-        //2个比较 - grey_0x80、grey_0x40
+-        tmp_grey = (grey_0x80 < grey_0x40) ? grey_0x80 : grey_0x40; // 最小灰度值
+-        tmp_ctrl = (grey_0x80 < grey_0x40) ? 0xbf : 0x7f; //最小补偿电容
+-        //2个比较 - tmp_grey、grey_precision
+-        *refctrl = (tmp_grey < grey_real) ? tmp_ctrl : min;
+-        *greyavg = ((tmp_grey < grey_real) ? tmp_grey : grey_real) / IMAGE_SIZE;
+-    } else if (grey_0x40 != 0 && grey_real != 0) { //范围是[0x40,0x80]2个点筛选
+-        *refctrl = (grey_0x40 < grey_real) ? 0x7f : min;
+-        *greyavg = ((grey_0x40 < grey_real) ? grey_0x40 : grey_real) / IMAGE_SIZE;
+-    } else if (grey_real != 0) { //范围是[0x00,0x40]
+-        *refctrl = min;
+-        *greyavg = grey_real / IMAGE_SIZE;
+-    }
+-    LOGD("refctr=0x%x, grey_avg=0x%x, ret=%d\n", *refctrl, *greyavg, ret);
++	
++	*refctrl = min;
++	*greyavg = grey_real / IMAGE_SIZE;
++    
++	LOGD("refctr=0x%x, grey_avg=0x%x, ret=%d\n", *refctrl, *greyavg, ret);
+     return ret;
+ }
+ 
+@@ -610,16 +602,13 @@ int fp64_reset_interrupt_parameters(void) {
+ 
+ int fp64_deadpix_factory_test()
+ {
+-    const int IMAGE_TH = IMAGE_W, TEMP_TH = 10, DETECT_LINE = 31;
+-    int ret = SUCCESS, count = 0, row, col, avg;
++    const int IMAGE_TH = IMAGE_W, TEMP_TH = 10, DETECT_LINE = 31, MAX_STEPS = 512;
++    int ret = SUCCESS, count = 0, row, col;
+     unsigned char pImgA[IMAGE_T_SIZE];
+     unsigned char pImgB[IMAGE_T_SIZE];
+-    double th_low, th_high, diff;
++    double th_low, th_high, diff, avg;
+ 
+-    fp64_reset_mode();
+-    sensor_set_register(MA_REF_CTRL_REG, 0);
+-    sensor_set_register(MA_REF_DMY_REG, 0);
+-    sensor_set_register(MA_112UM_GREY_OFST_REG, 0);
++    fp64_capture_mode();
+     sensor_set_register(MA_VOLTAGE_CFG_REG, 0);
+     fp64_read_image(pImgA, IMAGE_T_SIZE, 1);
+ 
+@@ -628,18 +617,20 @@ int fp64_deadpix_factory_test()
+     fp64_read_image(pImgB, IMAGE_T_SIZE, 1);
+ 
+     avg = 0;
+-    row = IMAGE_T_SIZE;
+-    while ( row-- ) {
+-        if(row % IMAGE_T_W) {
+-            avg += pImgA[row];
++    for(row = 0; row < IMAGE_H; row++) {
++        for(col = 1; col < IMAGE_T_W; col++) {
++            avg += pImgA[row * IMAGE_T_W + col];
++            count++;
+         }
+     }
+-    avg /= IMAGE_SIZE;
+-    th_low = 0.1 * (256 - avg);
+-    th_high = 0.4 * (256 - avg);
++    avg /= count;//图像均值
++
++    count = 0;
++    th_low = 0.1 * (MAX_STEPS - avg);
++    th_high = 0.4 * (MAX_STEPS - avg);
+ 
+     for(row = 0; row < IMAGE_H; row++) {
+-        for(col = 1; col <= IMAGE_W; col++) {
++        for(col = 1; col < IMAGE_T_W; col++) {
+             diff = pImgB[row * IMAGE_T_W + col] - pImgA[row * IMAGE_T_W + col];
+             if ((diff < th_low) || (diff > th_high)) {
+                 count++;
+@@ -656,8 +647,8 @@ int fp64_deadpix_factory_test()
+             avg += pImgA[row*IMAGE_T_W];
+         }
+         avg /= IMAGE_H;//温度列的均值
+-        th_low = 0.1 * (256 - avg);
+-        th_high = 0.4 * (256 - avg);
++        th_low = 0.1 * (MAX_STEPS - avg);
++        th_high = 0.4 * (MAX_STEPS - avg);
+         if((pImgB[DETECT_LINE * IMAGE_T_W] - pImgA[DETECT_LINE*IMAGE_T_W] < th_low) ||
+                 (pImgB[DETECT_LINE * IMAGE_T_W] - pImgA[DETECT_LINE*IMAGE_T_W] > th_high)) {
+             LOGE("special temperature deadpix error.");
+diff --git a/fingerprint/service/soft_sensor/sensor88/algorithm/finger_detect.c b/fingerprint/service/soft_sensor/sensor88/algorithm/finger_detect.c
+index ff783de..0393577 100644
+--- a/fingerprint/service/soft_sensor/sensor88/algorithm/finger_detect.c
++++ b/fingerprint/service/soft_sensor/sensor88/algorithm/finger_detect.c
+@@ -358,7 +358,7 @@ int fp88_finger_detect(u8 *imgIn, u8 *imgTmp)
+ 	//save_bmp(savePath,imgSmooth, WIDTH, HEIGHT);
+ 
+ 	gra = gradxy(imgSmooth,imgRate,150);
+-	printf("  gra = %f ",gra);
++	//printf("  gra = %f ",gra);
+ 
+ 	if (gra > 40) {
+ 		ret = per;
+@@ -370,7 +370,7 @@ int fp88_finger_detect(u8 *imgIn, u8 *imgTmp)
+ 	}
+ 
+ 	xian = xianxingdu(imgSmooth, imgRate);
+-	printf("  xian = %f  ",xian);
++	//printf("  xian = %f  ",xian);
+ 	if(xian == -1)
+ 		return -1;
+ 
+diff --git a/fingerprint/service/soft_sensor/sensor88/sensor88_config.h b/fingerprint/service/soft_sensor/sensor88/sensor88_config.h
+index 58be6de..797849b 100644
+--- a/fingerprint/service/soft_sensor/sensor88/sensor88_config.h
++++ b/fingerprint/service/soft_sensor/sensor88/sensor88_config.h
+@@ -6,6 +6,7 @@
+ 
+ #define IMAGE_W     88
+ #define IMAGE_H     88
++#define IMAGE_T_H   89
+ #define IMAGE_T_SIZE (88*89)
+ #define IMAGE_SIZE (IMAGE_W*IMAGE_H)
+ #define TEMPLATE_SIZE_A88               (6656/4)
+diff --git a/fingerprint/service/soft_sensor/sensor88/sensor_88.c b/fingerprint/service/soft_sensor/sensor88/sensor_88.c
+index b6253da..44a37e8 100644
+--- a/fingerprint/service/soft_sensor/sensor88/sensor_88.c
++++ b/fingerprint/service/soft_sensor/sensor88/sensor_88.c
+@@ -204,16 +204,20 @@ static int fp88_detect_mode_parameters(
+ 
+ int fp88_detect_mode(void)
+ {
+-    int n, a;
++    int n, a, i, ret;
+     unsigned char detect_refdrvsel;
+     context_get_sensor88_interrupt_param(&n, &a);
+     context_get_sensor88_detectrefdrvsel(&detect_refdrvsel);
+-    fp88_detect_mode_parameters(s88_main_config, detect_refdrvsel, s88_interrupt_start_line,
+-    		s88_interrupt_line_step, s88_interrupt_framerow, n, a, 0xa0);
++    for(i=0; i< 3;i++){
++        ret = fp88_detect_mode_parameters(s88_main_config, detect_refdrvsel, s88_interrupt_start_line,
++                s88_interrupt_line_step, s88_interrupt_framerow, n, a, 0xa0);
++        if(ret == SUCCESS) break;
++    }
+     LOGD("n = 0x%x, a = 0x%x\n", n, a);
+     return SUCCESS;
+ }
+ 
++
+ static void sensor_read_image(unsigned char *img, int size)
+ {
+     unsigned char *in;
+@@ -798,9 +802,11 @@ int fp88_reset_interrupt_parameters(void) {
+ /***********factory test****************/
+ int fp88_deadpix_factory_test(void)
+ {
++    int row, col;
+     int tmpimage_0x74[7832];
+     int tmpimage_0x7f[7832];
+-    int ret = SUCCESS, avg = 0, len = 7832, th1 = 0, th2 = 0, minus = 0, count = 0;
++    int ret = SUCCESS, len = 7832, count = 0, MAX_STEPS = 768;
++    double avg = 0, th1 = 0, th2 = 0, minus = 0;
+     fp88_reset_mode();
+     sensor_set_register(MA_88_REF_DRV_SEL_REG, 0);
+     sensor_set_register(MA_88_DREF_DRV_SEL_REG, 0);
+@@ -809,9 +815,17 @@ int fp88_deadpix_factory_test(void)
+     sensor_set_register(MA_REF_CTRL_REG, 0x74);
+     fp88_read_image(tmpimage_0x74, len, 1, 0, 0);
+ 
+-    avg = fp88_get_grey(tmpimage_0x74, len)/len;
+-    th1 = 0.1 * (768 - avg);
+-    th2 = 0.4 * (768 - avg);
++    for(row = 1; row < IMAGE_H; row++) {
++        for(col = 1; col < IMAGE_W - 1; col++) {
++            avg += tmpimage_0x74[row * IMAGE_W + col];
++            count++;
++        }
++    }
++    avg /= count;
++
++    count = 0;
++    th1 = 0.1 * (MAX_STEPS - avg);
++    th2 = 0.4 * (MAX_STEPS - avg);
+ 
+     fp88_reset_mode();
+     sensor_set_register(MA_88_REF_DRV_SEL_REG, 0);
+@@ -821,10 +835,24 @@ int fp88_deadpix_factory_test(void)
+     sensor_set_register(MA_REF_CTRL_REG, 0x7f);
+     fp88_read_image(tmpimage_0x7f, len, 1, 0, 0);
+ 
+-    while ( len-- ) {
+-        minus = tmpimage_0x7f[len] - tmpimage_0x74[len];
+-//        LOGD("%d ", minus);
+-        if(minus < th1 || minus > th2) count++;
++    for(row = 1; row < IMAGE_T_H; row++) {
++        for(col = 1; col < IMAGE_W - 1; col++) {
++            minus = tmpimage_0x7f[row * IMAGE_W + col] - tmpimage_0x74[row * IMAGE_W + col];
++            //        LOGD("%d ", minus);
++            if(minus < th1 || minus > th2) count++;
++        }
++    }
++    // temperature
++    avg = 0;
++    for(row = 0; row < IMAGE_W; row++) {
++        avg += tmpimage_0x74[row];
++    }
++    avg /= IMAGE_W;
++    th1 = 0.1 * (MAX_STEPS - avg);
++    th2 = 0.4 * (MAX_STEPS - avg);
++    for(row = 0; row < IMAGE_W; row++) {
++        minus = tmpimage_0x7f[row] - tmpimage_0x74[row];
++        if ((minus < th1) || (minus > th2)) count++;
+     }
+ 
+     if(count > IMAGE_W) ret = ERROR_DEADPIX_TEST_FAIL;
+diff --git a/fingerprint/service/soft_sensor/sensor88/sensor_wrapper.c b/fingerprint/service/soft_sensor/sensor88/sensor_wrapper.c
+index 95699b7..050fcf0 100644
+--- a/fingerprint/service/soft_sensor/sensor88/sensor_wrapper.c
++++ b/fingerprint/service/soft_sensor/sensor88/sensor_wrapper.c
+@@ -241,7 +241,7 @@ static int check_grey(int *image)
+ 
+ static int sensor88_refresh_calibrate_data(void) {
+     int ret = SUCCESS, bkg_grey_avg = 0;
+-    static int bkg[IMAGE_T_SIZE];
++    int bkg[IMAGE_T_SIZE];
+     unsigned char refdrvsel1 = 0, refdrvsel2 = 0, detect_refdrvsel = 0;
+     context_get_sensor88_refdrvsel(&refdrvsel1);
+ 
+@@ -713,11 +713,10 @@ static int algorithm88_navigate_direction(uint32_t *navi_result) {
+ 
+ static int sensor88_debug_get_enroll_img(void *img) {
+     if (g_config.save_debug_bmp) {
+-		memcpy((unsigned char *) img, protocol_image_buffer, sizeof(protocol_image_buffer));
+-		memcpy((unsigned char *) img + sizeof(protocol_image_buffer), (unsigned char *) g88_debug_image, IMAGE_SIZE);
+-		memcpy((unsigned char *) img + sizeof(protocol_image_buffer) + IMAGE_SIZE,
++		memcpy((unsigned char *) img, (unsigned char *) g88_debug_image, IMAGE_SIZE);
++		memcpy((unsigned char *) img + IMAGE_SIZE,
+ 				(unsigned char *) (g88_debug_image + IMAGE_SIZE), IMAGE_SIZE);
+-		memcpy((unsigned char *) img + sizeof(protocol_image_buffer) + IMAGE_SIZE * 2,
++		memcpy((unsigned char *) img + IMAGE_SIZE * 2,
+ 				(unsigned char *) (g88_debug_image + IMAGE_SIZE * 2), IMAGE_SIZE);
+     }
+ 	return SUCCESS;
+@@ -725,11 +724,10 @@ static int sensor88_debug_get_enroll_img(void *img) {
+ 
+ static int sensor88_debug_get_authenticate_img(void *img) {
+     if (g_config.save_debug_bmp) {
+-		memcpy((unsigned char *) img, protocol_image_buffer, sizeof(protocol_image_buffer));
+-		memcpy((unsigned char *) img + sizeof(protocol_image_buffer), (unsigned char *) g88_debug_image, IMAGE_SIZE);
+-		memcpy((unsigned char *) img + sizeof(protocol_image_buffer) + IMAGE_SIZE,
++		memcpy((unsigned char *) img , (unsigned char *) g88_debug_image, IMAGE_SIZE);
++		memcpy((unsigned char *) img + IMAGE_SIZE,
+ 				(unsigned char *) (g88_debug_image + IMAGE_SIZE), IMAGE_SIZE);
+-		memcpy((unsigned char *) img + sizeof(protocol_image_buffer) + IMAGE_SIZE * 2,
++		memcpy((unsigned char *) img + IMAGE_SIZE * 2,
+ 				(unsigned char *) (g88_debug_image + IMAGE_SIZE * 2), IMAGE_SIZE);
+     }
+ 	return SUCCESS;
+@@ -792,7 +790,7 @@ static int sensor88_factory_test_press(void) {
+ 
+ 	ret = sensor88_capture_mode();
+ 	if (ret == SUCCESS) {
+-		static int img[IMAGE_T_SIZE];
++		int img[IMAGE_T_SIZE];
+ 		fp88_read_image(img, IMAGE_T_SIZE, 1, 0, 0);
+ 		ret = check_grey(img);
+ 		if(ret == SUCCESS) {

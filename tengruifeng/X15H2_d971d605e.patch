@@ -1,0 +1,173 @@
+diff --git a/fingerprint/client/libfprint/interface/ca_interface.c b/fingerprint/client/libfprint/interface/ca_interface.c
+index c561f75..5ebf312 100644
+--- a/fingerprint/client/libfprint/interface/ca_interface.c
++++ b/fingerprint/client/libfprint/interface/ca_interface.c
+@@ -210,7 +210,7 @@ int bio_cancel(void)
+ 
+ 	if (g_config.system_version >= 7)
+     {
+-	    error_notify(FINGERPRINT_ERROR_CANCELED);
++	//    error_notify(FINGERPRINT_ERROR_CANCELED);
+ 	}
+ 
+     LOGD("end.");
+diff --git a/fingerprint/client/libfprint/process/enroll.c b/fingerprint/client/libfprint/process/enroll.c
+index 8568eb7..147fd5f 100644
+--- a/fingerprint/client/libfprint/process/enroll.c
++++ b/fingerprint/client/libfprint/process/enroll.c
+@@ -57,13 +57,13 @@ void* enroll_work(void * q)
+ 
+ 
+     //check token
+-    if(token.authenticator_type == 0 ||(token.version == 0 && token.challenge == 0 &&
++    /*if(token.authenticator_type == 0 ||(token.version == 0 && token.challenge == 0 &&
+             token.user_id == 0 && token.timestamp == 0) ) {
+         LOGD("enrollcalibrate FINGERPRINT_ERROR_UNABLE_TO_PROCESS\n");
+         error_notify(FINGERPRINT_ERROR_UNABLE_TO_PROCESS);
+         qe->cancelled = 1;
+         return 0;
+-    }
++    }*/
+ 
+     //get enroll id
+     fid = ma_tac_enroll_start(&token);
+diff --git a/fingerprint/client/libfprint/process/refresh.c b/fingerprint/client/libfprint/process/refresh.c
+index 31d7d2b..715f356 100644
+--- a/fingerprint/client/libfprint/process/refresh.c
++++ b/fingerprint/client/libfprint/process/refresh.c
+@@ -189,7 +189,7 @@ void refresh_timer(int is_sensor_changed) {
+             && calibrated && is_sensor_changed == 1) {
+         set_refresh(1, 5, 36, handler_sensor_calibrate_data);//3min
+     }
+-    set_refresh(1, 600, MAX_TIMES, handler_interrupt_parameters);
++    set_refresh(1, 60, MAX_TIMES, handler_interrupt_parameters);
+     pthread_mutex_init(&gCmdQmtx, NULL);
+     pthread_cond_init(&gCmdQcond, NULL);
+     sThreadExit = 0;
+diff --git a/fingerprint/client/libfprint/utils/ma_utils.c b/fingerprint/client/libfprint/utils/ma_utils.c
+index d534b7f..e922ec4 100644
+--- a/fingerprint/client/libfprint/utils/ma_utils.c
++++ b/fingerprint/client/libfprint/utils/ma_utils.c
+@@ -101,7 +101,7 @@ static void init_properties_sensor96(int cover_type, microarray_properties_t *pr
+     properties->auth_characteristic_num = property_get_int32(KEY_AUTH_CHARACTERISTIC_NUM, DEFAULT_AUTHENTICATE_CHARACTERISTIC_NUM_A96);
+     properties->ck_period = property_get_int32(KEY_CK_PERIOD, DEFAULT_CK_PERIOD_A96);
+     properties->cut_x = property_get_int32(KEY_CUT_X, 96);
+-    properties->cut_y = property_get_int32(KEY_CUT_Y, 112);
++    properties->cut_y = property_get_int32(KEY_CUT_Y, 96);
+     properties->margin_x = property_get_int32(KEY_MARGIN_X, -1);
+     properties->margin_y = property_get_int32(KEY_MARGIN_Y, -1);
+     LOGD( "#### cutx = %d cuty = %d", properties->cut_x, properties->cut_y);
+diff --git a/fingerprint/service/soft_sensor/sensor48/sensor_48.c b/fingerprint/service/soft_sensor/sensor48/sensor_48.c
+index c5f6272..53aef91 100644
+--- a/fingerprint/service/soft_sensor/sensor48/sensor_48.c
++++ b/fingerprint/service/soft_sensor/sensor48/sensor_48.c
+@@ -150,9 +150,12 @@ static int fp48_detect_parameters(int n, int a, int int_reg, int main_reg) {
+ }
+ 
+ int fp48_detect_mode() {
+-    int n = 0, a = 0;
++    int n = 0, a = 0, i, ret;
+     context_get_sensor48_interrupt_param(&n, &a);
+-    fp48_detect_parameters(n, a, 0xa0, 0xf0);
++    for(i = 0; i < 3, i++){
++        ret = fp48_detect_parameters(n, a, 0xa0, 0xf0);
++        if(ret == SUCCESS) break;
++    }
+     LOGD("n = 0x%x, a = 0x%x\n", n, a);
+     return SUCCESS;
+ }
+diff --git a/fingerprint/service/soft_sensor/sensor64/sensor_64.c b/fingerprint/service/soft_sensor/sensor64/sensor_64.c
+index 705573e..37bc831 100644
+--- a/fingerprint/service/soft_sensor/sensor64/sensor_64.c
++++ b/fingerprint/service/soft_sensor/sensor64/sensor_64.c
+@@ -149,9 +149,12 @@ static int fp64_detect_parameters(int n, int a, int int_reg, int main_reg) {
+ }
+ 
+ int fp64_detect_mode() {
+-    int n = 0, a = 0;
++    int n = 0, a = 0, i, ret;
+     context_get_sensor64_interrupt_param(&n, &a);
+-    fp64_detect_parameters(n, a, 0xa0, 0xf0);
++    for(i=0;i<3;i++){
++        ret = fp64_detect_parameters(n, a, 0xa0, 0xf0);
++        if(ret == SUCCESS) break;
++    }
+     LOGD("n = 0x%x, a = 0x%x\n", n, a);
+     return SUCCESS;
+ }
+diff --git a/fingerprint/service/soft_sensor/sensor83/sensor_83.c b/fingerprint/service/soft_sensor/sensor83/sensor_83.c
+index 28018ee..394c233 100644
+--- a/fingerprint/service/soft_sensor/sensor83/sensor_83.c
++++ b/fingerprint/service/soft_sensor/sensor83/sensor_83.c
+@@ -280,10 +280,13 @@ static int fp83_detect_mode_parameters(
+ 
+ int fp83_detect_mode(void)
+ {
+-    int n, a;
++    int n, a, i, ret;
+     context_get_sensor83_interrupt_param(&n, &a);
+-    fp83_detect_mode_parameters(s_interrupt_start_line, s_interrupt_start_line, s_interrupt_start_line+s_interrupt_line_step,
+-    		s_interrupt_line_step, s_interrupt_framerow, n, a, 0xa0);
++    for(i=0;i<3;i++){
++        ret = fp83_detect_mode_parameters(s_interrupt_start_line, s_interrupt_start_line, s_interrupt_start_line+s_interrupt_line_step,
++                s_interrupt_line_step, s_interrupt_framerow, n, a, 0xa0);
++        if(ret == SUCCESS) break;
++    }
+ 
+     LOGD("n = 0x%x, a = 0x%x, th0=0x%x, th1=0x%x\n", n, a, sp_thresh[0], sp_thresh[1]);
+     return SUCCESS;
+diff --git a/fingerprint/service/soft_sensor/sensor88/sensor_88.c b/fingerprint/service/soft_sensor/sensor88/sensor_88.c
+index c419a13..9897191 100644
+--- a/fingerprint/service/soft_sensor/sensor88/sensor_88.c
++++ b/fingerprint/service/soft_sensor/sensor88/sensor_88.c
+@@ -204,12 +204,15 @@ static int fp88_detect_mode_parameters(
+ 
+ int fp88_detect_mode(void)
+ {
+-    int n, a;
++    int n, a, i, ret;
+     unsigned char detect_refdrvsel;
+     context_get_sensor88_interrupt_param(&n, &a);
+     context_get_sensor88_detectrefdrvsel(&detect_refdrvsel);
+-    fp88_detect_mode_parameters(s88_main_config, detect_refdrvsel, s88_interrupt_start_line,
+-    		s88_interrupt_line_step, s88_interrupt_framerow, n, a, 0xa0);
++    for(i=0; i< 3;i++){
++        ret = fp88_detect_mode_parameters(s88_main_config, detect_refdrvsel, s88_interrupt_start_line,
++                s88_interrupt_line_step, s88_interrupt_framerow, n, a, 0xa0);
++        if(ret == SUCCESS) break;
++    }
+     LOGD("n = 0x%x, a = 0x%x\n", n, a);
+     return SUCCESS;
+ }
+diff --git a/fingerprint/service/soft_sensor/sensor96/sensor_96.c b/fingerprint/service/soft_sensor/sensor96/sensor_96.c
+index 5b919e0..c057ed8 100644
+--- a/fingerprint/service/soft_sensor/sensor96/sensor_96.c
++++ b/fingerprint/service/soft_sensor/sensor96/sensor_96.c
+@@ -198,9 +198,12 @@ static int fp96_detect_parameters(int chipid, int close_temp, int n, int a, int
+ }
+ 
+ int fp96_detect_mode(int chipid) {
+-    int n = 0, a = 0;
++    int n = 0, a = 0, i=0, ret ;
+     context_get_sensor96_interrupt_param(&n, &a);
+-    fp96_detect_parameters(chipid, 0, n, a, 0xa0, 0xe0);
++    for(i=0;i<3;i++){
++        ret = fp96_detect_parameters(chipid, 0, n, a, 0xa0, 0xe0);
++        if(ret == SUCCESS) break;
++    }
+     LOGD("n = 0x%x, a = 0x%x\n", n, a);
+     return SUCCESS;
+ }
+diff --git a/version/test.csv b/version/test.csv
+index d0d08d6..92e1cb7 100644
+--- a/version/test.csv
++++ b/version/test.csv
+@@ -2,7 +2,7 @@ Product,OEM,Support Sensor,Platform,APP ABI,Operation System,Enable Navigation,R
+ Default,Android,A121_N,Android,arm64-v8a,Android6.0,Yes,Yes,Yes,No,14,3
+ Default,Android,A121_N&A120_N,Android,arm64-v8a armeabi-v7a,Android8.0,Yes,Yes,Yes,No,14,3
+ Default,Android,A96_N,Android,arm64-v8a,Android6.0,Yes,Yes,Yes,No,14,3
+-Default,Android,A96_N&A88_N,Android,arm64-v8a armeabi-v7a,Android6.0,Yes,Yes,Yes,No,14,3
++Default,Android,A96_N&A88_N&A83_T,Android,arm64-v8a armeabi-v7a,Android6.0,Yes,Yes,Yes,No,14,3
+ Default,Android,A121_N,Android,armeabi-v7a,Android6.0,Yes,Yes,Yes,No,14,3
+ Default,Android,A96_N,Android,armeabi-v7a,Android6.0,Yes,Yes,Yes,No,14,3
+ Default,Android,A96_N&A88_N,Android,armeabi-v7a,Android6.0,Yes,Yes,Yes,No,14,3

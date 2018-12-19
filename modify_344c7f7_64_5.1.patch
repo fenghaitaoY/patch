@@ -1,0 +1,73 @@
+diff --git a/fingerprint/client/libfprint/drivercontroller/driver_controller.c b/fingerprint/client/libfprint/drivercontroller/driver_controller.c
+index 003418e..79362d1 100644
+--- a/fingerprint/client/libfprint/drivercontroller/driver_controller.c
++++ b/fingerprint/client/libfprint/drivercontroller/driver_controller.c
+@@ -71,7 +71,7 @@ int dc_send_cmd(int cmd)
+ {
+     int ret = 0;
+ 	uint8_t wbuf[6] = {0};
+-//	LOGD("cmd == 0x%x, %s\n", cmd, _num2string(cmd));
++	LOGD("cmd == 0x%x, %s\n", cmd, _num2string(cmd));
+ 	if (g_device_fd < 0) {
+ 		LOGE("%s can't open device\n", __func__);
+ #ifndef BUILD_JNI
+@@ -83,14 +83,14 @@ int dc_send_cmd(int cmd)
+ //    wbuf[1] = (cmd) & 0xff;
+ //    write(g_device_fd, wbuf, 6);
+ 
+-    while(1) {
++   // while(1) {
+         ret = ioctl(g_device_fd, cmd);
+         if((cmd == WAIT_FACTORY_CMD || cmd == SLEEP) && (ret != 0)) {
+             LOGE("%s, cmd=0x%x, ret=%d", __func__, cmd, ret);
+-        } else {
+-            break;
++        //} else {
++        //    break;
+         }
+-    }
++    //}
+ 	return 0;
+ }
+ 
+diff --git a/fingerprint/client/libfprint/process/enroll.c b/fingerprint/client/libfprint/process/enroll.c
+index d3a6e8a..4c6b384 100644
+--- a/fingerprint/client/libfprint/process/enroll.c
++++ b/fingerprint/client/libfprint/process/enroll.c
+@@ -20,7 +20,7 @@ static int check_timeout(uint64_t start_time, int timeout) {
+     cur_time = now.tv_sec;
+ 
+     if (cur_time - start_time > timeout) {
+-        result = 1;
++        result = 0;
+     }
+     return result;
+ }
+diff --git a/fingerprint/service/soft_sensor/sensor64/sensor_wrapper.c b/fingerprint/service/soft_sensor/sensor64/sensor_wrapper.c
+index 3dc4a47..6027c31 100644
+--- a/fingerprint/service/soft_sensor/sensor64/sensor_wrapper.c
++++ b/fingerprint/service/soft_sensor/sensor64/sensor_wrapper.c
+@@ -169,8 +169,8 @@ static int sensor64_create(microarray_properties_t *config) {
+     context_get_sensor64_interrupt_calibrated(&g_config.ma_ctx.interrupt_calibrated);
+     fp64_detect_mode();
+ 
+-    //LOGD("end.");
+-    
++    LOGD("end.");
++
+     return ret;
+ }
+ 
+diff --git a/version/test.csv b/version/test.csv
+index 91163d3..fbd7f12 100644
+--- a/version/test.csv
++++ b/version/test.csv
+@@ -52,7 +52,7 @@ Default,Android,A96_N,RSEE,arm64-v8a armeabi-v7a,Android6.0,Yes,Yes,Yes,No,14,3
+ Default,Android,A120_N&A96_N,Android,arm64-v8a armeabi-v7a,Android6.0,Yes,Yes,Yes,No,14,3
+ Default,Android,A96_N,Trusty,armeabi-v7a,Android6.0,Yes,Yes,Yes,No,14,3
+ Default,Android,A83_N,Trusty,armeabi-v7a,Android6.0,Yes,Yes,Yes,No,14,3
+-Default,Android,A64_N,Android,arm64-v8a,Android6.0,Yes,Yes,Yes,No,14,3
++Default,Android,A64_N&A96_N,Android,arm64-v8a armeabi,Android5.1,Yes,Yes,Yes,No,14,3
+ Default,Android,A64_N,Android,armeabi-v7a,Android8.0,Yes,Yes,Yes,No,14,3
+ Default,Android,A72_N,Android,arm64-v8a,Android6.0,Yes,Yes,Yes,No,14,3
+ Default,Android,A48_N,Android,arm64-v8a,Android6.0,Yes,Yes,Yes,No,14,3
